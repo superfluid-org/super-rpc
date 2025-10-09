@@ -1,9 +1,12 @@
+import { createHash } from 'crypto';
 import { JSONRPCRequest, JSONRPCResponse, CacheEntry, CacheStats } from '@/types';
 import { ProxyConfig } from '@/types/config';
 import { DUPLICATE_REQUEST_CONFIG } from '@/config/constants';
 import { Logger } from '@/utils/logger';
 import { LRUCache } from './lru-cache';
 import { DatabaseCache } from './database';
+import { ResponseCompressor, CompressedData } from '@/utils/compression';
+import { PrometheusMetrics } from '@/telemetry/metrics';
 
 /**
  * Cache Manager - Handles both memory and database caching
@@ -14,6 +17,7 @@ export class CacheManager {
   private logger: Logger;
   private duplicateDetector = new Map<string, number>();
   private config: ProxyConfig;
+  private metrics = PrometheusMetrics.getInstance();
 
   constructor(config: ProxyConfig, logger: Logger) {
     this.config = config;
@@ -64,7 +68,43 @@ export class CacheManager {
   }
 
   getCacheKey(request: JSONRPCRequest): string {
-    return `${request.method}${JSON.stringify(request.params || [])}`;
+    const method = request.method;
+    const params = request.params || [];
+    
+    // Fast path for common methods with no params
+    if (params.length === 0) {
+      return method;
+    }
+    
+    // Fast path for single param methods
+    if (params.length === 1) {
+      return `${method}:${params[0]}`;
+    }
+    
+    // Fast path for eth_call with specific patterns
+    if (method === 'eth_call' && params.length === 2) {
+      const callObject = params[0] as any;
+      const blockTag = params[1];
+      if (callObject && typeof callObject === 'object' && callObject.to && callObject.data) {
+        return `${method}:${callObject.to}:${callObject.data}:${blockTag}`;
+      }
+    }
+    
+    // Fast path for eth_getLogs
+    if (method === 'eth_getLogs' && params.length === 1) {
+      const filter = params[0] as any;
+      if (filter && typeof filter === 'object') {
+        const address = filter.address || '';
+        const fromBlock = filter.fromBlock || '0x0';
+        const toBlock = filter.toBlock || 'latest';
+        const topics = filter.topics ? JSON.stringify(filter.topics) : '[]';
+        return `${method}:${address}:${fromBlock}:${toBlock}:${topics}`;
+      }
+    }
+    
+    // Fallback to hash for complex cases
+    const content = `${method}:${JSON.stringify(params)}`;
+    return createHash('sha256').update(content).digest('hex').substring(0, 16);
   }
 
   async handleDuplicateRequest(cacheKey: string): Promise<void> {
@@ -96,12 +136,38 @@ export class CacheManager {
     if (this.cache.has(key)) {
       const cachedEntry = this.cache.get(key)!;
       if (Date.now() - cachedEntry.ts <= maxAgeMs) {
-        val = cachedEntry.val;
+        // Handle compressed data
+        if (cachedEntry.compressed) {
+          try {
+            const compressedData: CompressedData = {
+              compressed: true,
+              data: cachedEntry.val as Buffer,
+              originalSize: cachedEntry.originalSize,
+              compressedSize: cachedEntry.compressedSize
+            };
+            val = await ResponseCompressor.decompress(compressedData);
+            
+            // Record decompression metrics
+            this.metrics.compressionOperations.labels('decompress').inc();
+          } catch (error) {
+            this.logger.warn('Failed to decompress cached data', { key, error: (error as any)?.message });
+            val = cachedEntry.val; // Fallback to original data
+          }
+        } else {
+          val = cachedEntry.val;
+        }
+        
         // Update read count
         cachedEntry.readCnt++;
         this.cache.set(key, cachedEntry);
         
-        this.logger.debug('Memory cache hit', { key, requestId });
+        this.logger.debug('Memory cache hit', { 
+          key, 
+          requestId, 
+          compressed: cachedEntry.compressed,
+          originalSize: cachedEntry.originalSize,
+          compressedSize: cachedEntry.compressedSize
+        });
       } else {
         this.logger.debug('Memory cache entry expired', { key, maxAgeMs });
         this.cache.delete(key); // Remove expired entry
@@ -113,11 +179,23 @@ export class CacheManager {
         const row = await this.dbCache.get(key);
         if (row && Date.now() - row.ts <= maxAgeMs) {
           this.logger.debug('Database cache hit', { key, requestId });
-          val = JSON.parse(row.val);
+          
+          // Try to parse as compressed data first
+          try {
+            const compressedData = JSON.parse(row.val) as CompressedData;
+            if (compressedData.compressed) {
+              val = await ResponseCompressor.decompress(compressedData);
+            } else {
+              val = compressedData.data;
+            }
+          } catch {
+            // Fallback to regular JSON parsing for backward compatibility
+            val = JSON.parse(row.val);
+          }
           
           // Promote to memory cache for faster future access
           const cacheEntry: CacheEntry = {
-            val,
+            val: val,
             ts: row.ts,
             readCnt: 1,
             writeCnt: 0
@@ -146,19 +224,71 @@ export class CacheManager {
 
   async writeToCache(key: string, val: unknown): Promise<void> {
     const timestamp = Date.now();
+    
+    // Try to compress the data
+    let compressedData: CompressedData;
+    let finalVal: unknown = val;
+    let compressionStats: any = {};
+
+    try {
+      const jsonString = JSON.stringify(val);
+      if (ResponseCompressor.shouldCompress(jsonString)) {
+        compressedData = await ResponseCompressor.compress(jsonString);
+        if (compressedData.compressed) {
+          finalVal = compressedData.data;
+          compressionStats = ResponseCompressor.getCompressionStats(compressedData);
+          
+          // Record compression metrics
+          this.metrics.compressionRatio.observe(compressionStats.compressionRatio);
+          this.metrics.compressionSavings.inc(compressionStats.spaceSaved);
+          this.metrics.compressionOperations.labels('compress').inc();
+          
+          this.logger.debug('Cache data compressed', {
+            key,
+            originalSize: compressionStats.originalSize,
+            compressedSize: compressionStats.compressedSize,
+            spaceSavedPercent: compressionStats.spaceSavedPercent
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Failed to compress cache data', { key, error: (error as any)?.message });
+    }
+
     const newEntry: CacheEntry = {
-      val,
+      val: finalVal,
       ts: timestamp,
       readCnt: this.cache.has(key) ? this.cache.get(key)!.readCnt : 0,
       writeCnt: this.cache.has(key) ? this.cache.get(key)!.writeCnt + 1 : 1,
+      compressed: compressionStats.compressed || false,
+      originalSize: compressionStats.originalSize,
+      compressedSize: compressionStats.compressedSize
     };
 
-    this.logger.debug('Writing to cache', { key, timestamp });
+    this.logger.debug('Writing to cache', { 
+      key, 
+      timestamp, 
+      compressed: newEntry.compressed,
+      originalSize: newEntry.originalSize,
+      compressedSize: newEntry.compressedSize
+    });
 
     // Write to database cache if available
     if (this.dbCache) {
       try {
-        await this.dbCache.set(key, JSON.stringify(newEntry.val), newEntry.ts);
+        if (compressionStats.compressed) {
+          // Store compressed data in database
+          const compressedDataForDb: CompressedData = {
+            compressed: true,
+            data: finalVal as Buffer,
+            originalSize: compressionStats.originalSize,
+            compressedSize: compressionStats.compressedSize
+          };
+          await this.dbCache.set(key, JSON.stringify(compressedDataForDb), newEntry.ts);
+        } else {
+          // Store uncompressed data in database
+          await this.dbCache.set(key, JSON.stringify(val), newEntry.ts);
+        }
       } catch (error) {
         this.logger.error('Database cache write error', { error: (error as any)?.message, key });
       }

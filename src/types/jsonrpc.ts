@@ -30,6 +30,9 @@ export interface CacheEntry {
   ts: number;
   readCnt: number;
   writeCnt: number;
+  compressed?: boolean;
+  originalSize?: number;
+  compressedSize?: number;
 }
 
 export interface DatabaseRow {

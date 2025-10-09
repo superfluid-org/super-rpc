@@ -161,6 +161,32 @@ export class DatabaseCache {
     }
   }
 
+  async batchWrite(entries: Array<{key: string, val: string, ts: number}>): Promise<void> {
+    if (!this.dbRun) {
+      throw new Error('Database not initialized');
+    }
+
+    if (entries.length === 0) return;
+
+    try {
+      await this.dbRun('BEGIN TRANSACTION', []);
+      
+      for (const entry of entries) {
+        await this.dbRun(
+          `INSERT OR REPLACE INTO data(key, val, ts, updated_at) VALUES(?, ?, ?, CURRENT_TIMESTAMP)`,
+          [entry.key, entry.val, entry.ts]
+        );
+      }
+      
+      await this.dbRun('COMMIT', []);
+      this.logger.debug(`Batch wrote ${entries.length} entries to database`);
+    } catch (error) {
+      await this.dbRun('ROLLBACK', []).catch(() => {}); // Ignore rollback errors
+      this.logger.error('Database batch write error', { error: (error as any)?.message });
+      throw error;
+    }
+  }
+
   async vacuum(): Promise<void> {
     if (!this.dbRun) {
       throw new Error('Database not initialized');

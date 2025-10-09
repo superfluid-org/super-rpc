@@ -2,6 +2,7 @@ import axios, { AxiosResponse, AxiosError } from 'axios';
 import { JSONRPCRequest, JSONRPCResponse } from '@/types';
 import { ProxyConfig } from '@/types/config';
 import { Logger } from '@/utils/logger';
+import { ConnectionPoolManager } from '@/utils/connection-pool';
 
 /**
  * HTTP Client with Retry Logic and Exponential Backoff
@@ -9,20 +10,31 @@ import { Logger } from '@/utils/logger';
 export class HTTPClient {
   private config: ProxyConfig;
   private logger: Logger;
+  private connectionPool?: ConnectionPoolManager;
 
-  constructor(config: ProxyConfig, logger: Logger) {
+  constructor(config: ProxyConfig, logger: Logger, connectionPool?: ConnectionPoolManager) {
     this.config = config;
     this.logger = logger;
+    this.connectionPool = connectionPool;
   }
 
   async makeRequest(
     requestBody: JSONRPCRequest,
     retries: number = this.config.rpc.retries,
     timeoutMs: number = this.config.rpc.initialTimeoutMs,
-    targetUrl?: string
+    targetUrl?: string,
+    networkKey?: string
   ): Promise<AxiosResponse<JSONRPCResponse>> {
     const startTime = Date.now();
     const url = targetUrl || this.config.rpc.url;
+    
+    // Get appropriate agent for the network
+    let httpAgent, httpsAgent;
+    if (this.connectionPool && networkKey) {
+      const agent = this.connectionPool.getAgentForNetwork(networkKey);
+      httpAgent = agent.httpAgent;
+      httpsAgent = agent.httpsAgent;
+    }
     
     try {
       const response = await axios.post<JSONRPCResponse>(
@@ -34,6 +46,8 @@ export class HTTPClient {
             'Content-Type': 'application/json',
             'User-Agent': 'RPC-Proxy/1.0.0',
           },
+          httpAgent,
+          httpsAgent,
           // Disable automatic JSON parsing to handle malformed responses
           transformResponse: [(data) => {
             try {
