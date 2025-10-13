@@ -5,8 +5,6 @@ import { DUPLICATE_REQUEST_CONFIG } from '@/config/constants';
 import { Logger } from '@/utils/logger';
 import { LRUCache } from './lru-cache';
 import { DatabaseCache } from './database';
-import { ResponseCompressor, CompressedData } from '@/utils/compression';
-import { PrometheusMetrics } from '@/telemetry/metrics';
 
 /**
  * Cache Manager - Handles both memory and database caching
@@ -17,7 +15,6 @@ export class CacheManager {
   private logger: Logger;
   private duplicateDetector = new Map<string, number>();
   private config: ProxyConfig;
-  private metrics = PrometheusMetrics.getInstance();
 
   constructor(config: ProxyConfig, logger: Logger) {
     this.config = config;
@@ -137,25 +134,7 @@ export class CacheManager {
       const cachedEntry = this.cache.get(key)!;
       if (Date.now() - cachedEntry.ts <= maxAgeMs) {
         // Handle compressed data
-        if (cachedEntry.compressed) {
-          try {
-            const compressedData: CompressedData = {
-              compressed: true,
-              data: cachedEntry.val as Buffer,
-              originalSize: cachedEntry.originalSize,
-              compressedSize: cachedEntry.compressedSize
-            };
-            val = await ResponseCompressor.decompress(compressedData);
-            
-            // Record decompression metrics
-            this.metrics.compressionOperations.labels('decompress').inc();
-          } catch (error) {
-            this.logger.warn('Failed to decompress cached data', { key, error: (error as any)?.message });
-            val = cachedEntry.val; // Fallback to original data
-          }
-        } else {
-          val = cachedEntry.val;
-        }
+        val = cachedEntry.val;
         
         // Update read count
         cachedEntry.readCnt++;
@@ -180,18 +159,8 @@ export class CacheManager {
         if (row && Date.now() - row.ts <= maxAgeMs) {
           this.logger.debug('Database cache hit', { key, requestId });
           
-          // Try to parse as compressed data first
-          try {
-            const compressedData = JSON.parse(row.val) as CompressedData;
-            if (compressedData.compressed) {
-              val = await ResponseCompressor.decompress(compressedData);
-            } else {
-              val = compressedData.data;
-            }
-          } catch {
-            // Fallback to regular JSON parsing for backward compatibility
-            val = JSON.parse(row.val);
-          }
+          // Parse the cached data
+          val = JSON.parse(row.val);
           
           // Promote to memory cache for faster future access
           const cacheEntry: CacheEntry = {
@@ -225,44 +194,14 @@ export class CacheManager {
   async writeToCache(key: string, val: unknown): Promise<void> {
     const timestamp = Date.now();
     
-    // Try to compress the data
-    let compressedData: CompressedData;
-    let finalVal: unknown = val;
-    let compressionStats: any = {};
-
-    try {
-      const jsonString = JSON.stringify(val);
-      if (ResponseCompressor.shouldCompress(jsonString)) {
-        compressedData = await ResponseCompressor.compress(jsonString);
-        if (compressedData.compressed) {
-          finalVal = compressedData.data;
-          compressionStats = ResponseCompressor.getCompressionStats(compressedData);
-          
-          // Record compression metrics
-          this.metrics.compressionRatio.observe(compressionStats.compressionRatio);
-          this.metrics.compressionSavings.inc(compressionStats.spaceSaved);
-          this.metrics.compressionOperations.labels('compress').inc();
-          
-          this.logger.debug('Cache data compressed', {
-            key,
-            originalSize: compressionStats.originalSize,
-            compressedSize: compressionStats.compressedSize,
-            spaceSavedPercent: compressionStats.spaceSavedPercent
-          });
-        }
-      }
-    } catch (error) {
-      this.logger.warn('Failed to compress cache data', { key, error: (error as any)?.message });
-    }
-
     const newEntry: CacheEntry = {
-      val: finalVal,
+      val,
       ts: timestamp,
       readCnt: this.cache.has(key) ? this.cache.get(key)!.readCnt : 0,
       writeCnt: this.cache.has(key) ? this.cache.get(key)!.writeCnt + 1 : 1,
-      compressed: compressionStats.compressed || false,
-      originalSize: compressionStats.originalSize,
-      compressedSize: compressionStats.compressedSize
+      compressed: false,
+      originalSize: JSON.stringify(val).length,
+      compressedSize: JSON.stringify(val).length
     };
 
     this.logger.debug('Writing to cache', { 
@@ -276,19 +215,7 @@ export class CacheManager {
     // Write to database cache if available
     if (this.dbCache) {
       try {
-        if (compressionStats.compressed) {
-          // Store compressed data in database
-          const compressedDataForDb: CompressedData = {
-            compressed: true,
-            data: finalVal as Buffer,
-            originalSize: compressionStats.originalSize,
-            compressedSize: compressionStats.compressedSize
-          };
-          await this.dbCache.set(key, JSON.stringify(compressedDataForDb), newEntry.ts);
-        } else {
-          // Store uncompressed data in database
-          await this.dbCache.set(key, JSON.stringify(val), newEntry.ts);
-        }
+        await this.dbCache.set(key, JSON.stringify(val), newEntry.ts);
       } catch (error) {
         this.logger.error('Database cache write error', { error: (error as any)?.message, key });
       }

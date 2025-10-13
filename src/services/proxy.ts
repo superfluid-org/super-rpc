@@ -1,6 +1,4 @@
 import http from 'http';
-import fs from 'fs';
-import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -86,31 +84,38 @@ export class RPCProxy {
 
 		this.httpClient = new HTTPClient(this.config, this.logger, this.connectionPool);
 
-		// Load network map
-		const mapPath = process.env.RPC_NETWORKS_FILE
-			? path.resolve(process.env.RPC_NETWORKS_FILE)
-			: path.resolve(process.cwd(), 'rpc.networks.json');
-		if (fs.existsSync(mapPath)) {
-			try {
-				const raw = fs.readFileSync(mapPath, 'utf8');
-				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed === 'object') {
-					for (const [k, v] of Object.entries(parsed)) {
-						if (typeof k === 'string' && typeof v === 'string') {
-							this.networkMap[k] = v;
-							// Initialize circuit breaker for each network
-							this.circuitBreakers.set(k, new CircuitBreaker({
-								failureThreshold: 5,
-								recoveryTimeout: 60000, // 1 minute
-								monitoringPeriod: 300000 // 5 minutes
-							}, this.logger));
-						}
-					}
-					this.logger.info('Loaded RPC networks map', { count: Object.keys(this.networkMap).length, mapPath });
+		// Load network map from config
+		this.loadNetworkMap();
+	}
+
+	private loadNetworkMap(): void {
+		// Load networks from config (YAML or environment variables)
+		const networks = this.config.rpc.networks;
+		
+		if (networks && typeof networks === 'object') {
+			for (const [key, config] of Object.entries(networks)) {
+				if (typeof config === 'object' && config !== null && 'url' in config) {
+					this.networkMap[key] = config.url;
+					// Initialize circuit breaker for each network
+					this.circuitBreakers.set(key, new CircuitBreaker({
+						failureThreshold: 5,
+						recoveryTimeout: 60000, // 1 minute
+						monitoringPeriod: 300000 // 5 minutes
+					}, this.logger));
+				} else if (typeof config === 'string') {
+					this.networkMap[key] = config;
+					// Initialize circuit breaker for each network
+					this.circuitBreakers.set(key, new CircuitBreaker({
+						failureThreshold: 5,
+						recoveryTimeout: 60000, // 1 minute
+						monitoringPeriod: 300000 // 5 minutes
+					}, this.logger));
 				}
-			} catch (e: any) {
-				this.logger.warn('Failed to load RPC networks map', { mapPath, error: e?.message });
 			}
+			this.logger.info('Loaded RPC networks from config', { 
+				count: Object.keys(this.networkMap).length,
+				networks: Object.keys(this.networkMap)
+			});
 		}
 	}
 
@@ -170,11 +175,11 @@ export class RPCProxy {
 	}
 
 	private setupMiddleware(): void {
-		if (this.config.security.enableHelmet) {
-			this.app.use(helmet());
+		if (this.config.helmet.enabled) {
+			this.app.use(helmet({ contentSecurityPolicy: this.config.helmet.contentSecurityPolicy }));
 		}
-		if (this.config.security.enableCors) {
-			this.app.use(cors({ origin: this.config.security.allowedOrigins.length > 0 ? this.config.security.allowedOrigins : undefined }));
+		if (this.config.cors.enabled) {
+			this.app.use(cors({ origin: this.config.cors.origin, credentials: this.config.cors.credentials }));
 		}
 		
 		// Compression will be added when dependency is available
@@ -268,7 +273,7 @@ export class RPCProxy {
 				const defaultUrl = this.config.rpc.url || Object.values(this.networkMap)[0];
 				if (!defaultUrl) {
 					res.status(HTTP_STATUS.BAD_REQUEST).json({ 
-						error: 'No RPC URL configured. Please set RPC_URL environment variable or configure networks in rpc.networks.json' 
+						error: 'No RPC URL configured. Please set RPC_URL environment variable or configure networks in config.yaml' 
 					});
 					return;
 				}

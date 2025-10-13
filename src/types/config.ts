@@ -1,5 +1,5 @@
 /**
- * Application Configuration Types
+ * Simplified Application Configuration Types
  */
 
 export interface ProxyConfig {
@@ -7,8 +7,8 @@ export interface ProxyConfig {
   rpc: RPCConfig;
   cache: CacheConfig;
   rateLimit: RateLimitConfig;
-  logging: LoggingConfig;
-  security: SecurityConfig;
+  cors: CorsConfig;
+  helmet: HelmetConfig;
 }
 
 export interface ServerConfig {
@@ -22,6 +22,9 @@ export interface RPCConfig {
   timeout: number;
   retries: number;
   initialTimeoutMs: number;
+  networks: Record<string, any>;
+  batchConcurrencyLimit: number;
+  batchTimeout: number;
 }
 
 export interface CacheConfig {
@@ -33,16 +36,16 @@ export interface CacheConfig {
 
 export interface RateLimitConfig {
   windowMs: number;
-  max: number;
+  maxRequests: number;
 }
 
-export interface LoggingConfig {
-  level: string;
-  enableConsole: boolean;
+export interface CorsConfig {
+  enabled: boolean;
+  origin: string;
+  credentials: boolean;
 }
 
-export interface SecurityConfig {
-  allowedOrigins: string[];
-  enableHelmet: boolean;
-  enableCors: boolean;
+export interface HelmetConfig {
+  enabled: boolean;
+  contentSecurityPolicy: boolean;
 }

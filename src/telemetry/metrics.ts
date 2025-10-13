@@ -16,11 +16,6 @@ export class PrometheusMetrics {
 	circuitBreakerState!: client.Gauge<string>;
 	queueSize!: client.Gauge<string>;
 	queuePending!: client.Gauge<string>;
-	
-	// Compression metrics
-	compressionRatio!: client.Histogram<string>;
-	compressionSavings!: client.Counter<string>;
-	compressionOperations!: client.Counter<string>;
 
 	static getInstance(): PrometheusMetrics {
 		if (!this.instance) {
@@ -103,24 +98,6 @@ export class PrometheusMetrics {
 			name: 'rpc_queue_pending',
 			help: 'Number of pending requests in queue',
 			labelNames: ['network'],
-		});
-
-		// Compression metrics
-		this.compressionRatio = new client.Histogram({
-			name: 'rpc_compression_ratio',
-			help: 'Compression ratio (compressed/original size)',
-			buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-		});
-
-		this.compressionSavings = new client.Counter({
-			name: 'rpc_compression_savings_bytes',
-			help: 'Total bytes saved through compression',
-		});
-
-		this.compressionOperations = new client.Counter({
-			name: 'rpc_compression_operations_total',
-			help: 'Total compression operations',
-			labelNames: ['operation'], // 'compress', 'decompress'
 		});
 
 		this.initialized = true;

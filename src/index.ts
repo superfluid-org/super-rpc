@@ -1,27 +1,13 @@
 import 'dotenv/config';
-import fs from 'fs';
-import path from 'path';
 import { Application } from './app';
 
 /**
  * Application Entry Point
  */
 async function bootstrap(): Promise<void> {
-  // Validate required configuration: either RPC_URL or a networks map file
-  const networksPath = process.env.RPC_NETWORKS_FILE
-    ? path.resolve(process.env.RPC_NETWORKS_FILE)
-    : path.resolve(process.cwd(), 'rpc.networks.json');
-
-  const hasNetworksFile = fs.existsSync(networksPath);
-  const hasSingleUrl = !!process.env.RPC_URL;
-
-  if (!hasSingleUrl && !hasNetworksFile) {
-    console.error('Error: Provide either RPC_URL or a networks map file.');
-    console.error('Set RPC_NETWORKS_FILE=<path/to/json> or create rpc.networks.json in project root.');
-    console.error('Example networks JSON: { "base-mainnet": "https://...", "polygon-mainnet": "https://..." }');
-    process.exit(1);
-  }
-
+  // Configuration validation is now handled by ConfigManager
+  // It will load from config.yaml or environment variables
+  
   try {
     const app = new Application();
     await app.start();

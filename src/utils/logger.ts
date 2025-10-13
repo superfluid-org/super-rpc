@@ -49,8 +49,8 @@ export class Logger {
       );
     }
 
-    // Console transport for development or when explicitly enabled
-    if (config.logging.enableConsole) {
+    // Console transport for development
+    if (config.server.environment === 'development') {
       transports.push(
         new winston.transports.Console({
           format: winston.format.combine(
@@ -66,7 +66,7 @@ export class Logger {
     }
 
     return winston.createLogger({
-      level: config.logging.level,
+      level: process.env.LOG_LEVEL || 'info',
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.errors({ stack: true }),
