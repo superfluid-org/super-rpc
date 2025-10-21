@@ -11,12 +11,9 @@ import { CACHEABLE_METHODS, HTTP_STATUS, JSONRPC_ERRORS } from '@/config/constan
 import { createRequestLogger, createRPCLogger, createErrorLogger, createPerformanceLogger } from '@/middleware/logging';
 import { validateContentType, validateJSONRPCRequest, validateParameters, validateRequestSize } from '@/middleware/validation';
 import { PrometheusMetrics } from '@/telemetry/metrics';
-import { CircuitBreaker } from '@/utils/circuit-breaker';
 import { ConnectionPoolManager } from '@/utils/connection-pool';
 import { RequestQueueManager } from '@/utils/request-queue';
-import { CacheWarmer } from '@/utils/cache-warmer';
-import { SubgraphPrefetcher } from '@/utils/subgraph-prefetcher';
-import { AdvancedSubgraphCacheStrategy } from '@/utils/subgraph-cache-strategy';
+import { SimpleSubgraphCacheStrategy } from '@/utils/subgraph-cache-strategy';
 import { SubgraphMetrics } from '@/telemetry/subgraph-metrics';
 
 export class RPCProxy {
@@ -33,13 +30,10 @@ export class RPCProxy {
 	
 	// New optimization components
 	private readonly connectionPool: ConnectionPoolManager;
-	private readonly circuitBreakers: Map<string, CircuitBreaker> = new Map();
 	private readonly requestQueues: RequestQueueManager;
-	private readonly cacheWarmer: CacheWarmer;
 	
 	// Subgraph-specific optimizations
-	private readonly subgraphPrefetcher: SubgraphPrefetcher;
-	private readonly subgraphCacheStrategy: AdvancedSubgraphCacheStrategy;
+	private readonly subgraphCacheStrategy: SimpleSubgraphCacheStrategy;
 	private readonly subgraphMetrics: SubgraphMetrics;
 	
 	private stats: ProxyStats = {
@@ -56,30 +50,16 @@ export class RPCProxy {
 		// Initialize optimization components
 		this.connectionPool = new ConnectionPoolManager({
 			maxSockets: 50,
-			maxFreeSockets: 10,
-			keepAlive: true,
-			keepAliveMsecs: 30000,
-			timeout: 60000
-		}, this.logger);
+			keepAlive: true
+		});
 
 		this.requestQueues = new RequestQueueManager({
 			concurrency: 20,
-			interval: 1000,
-			intervalCap: 100,
-			timeout: 30000,
-			throwOnTimeout: false
-		}, this.logger);
-
-		this.cacheWarmer = new CacheWarmer({
-			enabled: process.env.ENABLE_CACHE_WARMING === 'true',
-			interval: parseInt(process.env.CACHE_WARMING_INTERVAL || '300000'), // 5 minutes
-			methods: ['eth_blockNumber', 'eth_chainId', 'net_version'],
-			networks: Object.keys(this.networkMap)
-		}, this.logger);
+			timeout: 30000
+		});
 
 		// Initialize subgraph-specific optimizations
-		this.subgraphPrefetcher = new SubgraphPrefetcher(this.logger);
-		this.subgraphCacheStrategy = new AdvancedSubgraphCacheStrategy(this.logger);
+		this.subgraphCacheStrategy = new SimpleSubgraphCacheStrategy();
 		this.subgraphMetrics = SubgraphMetrics.getInstance();
 
 		this.httpClient = new HTTPClient(this.config, this.logger, this.connectionPool);
@@ -92,24 +72,18 @@ export class RPCProxy {
 		// Load networks from config (YAML or environment variables)
 		const networks = this.config.rpc.networks;
 		
+		this.logger.debug('Loading networks from config', { 
+			networks: networks,
+			type: typeof networks,
+			keys: networks ? Object.keys(networks) : []
+		});
+		
 		if (networks && typeof networks === 'object') {
 			for (const [key, config] of Object.entries(networks)) {
-				if (typeof config === 'object' && config !== null && 'url' in config) {
-					this.networkMap[key] = config.url;
-					// Initialize circuit breaker for each network
-					this.circuitBreakers.set(key, new CircuitBreaker({
-						failureThreshold: 5,
-						recoveryTimeout: 60000, // 1 minute
-						monitoringPeriod: 300000 // 5 minutes
-					}, this.logger));
+				if (typeof config === 'object' && config !== null && 'primary' in config) {
+					this.networkMap[key] = config.primary.url;
 				} else if (typeof config === 'string') {
 					this.networkMap[key] = config;
-					// Initialize circuit breaker for each network
-					this.circuitBreakers.set(key, new CircuitBreaker({
-						failureThreshold: 5,
-						recoveryTimeout: 60000, // 1 minute
-						monitoringPeriod: 300000 // 5 minutes
-					}, this.logger));
 				}
 			}
 			this.logger.info('Loaded RPC networks from config', { 
@@ -133,7 +107,7 @@ export class RPCProxy {
 				});
 				
 				// Start cache warmer
-				this.cacheWarmer.start();
+				// Circuit breakers removed
 				
 				resolve();
 			});
@@ -165,7 +139,7 @@ export class RPCProxy {
 		await this.cacheManager.close();
 		this.connectionPool.destroy();
 		this.requestQueues.destroy();
-		this.cacheWarmer.stop();
+		// Cache warmer removed
 		
 		if (this.server) {
 			await new Promise<void>((resolve, reject) => {
@@ -213,20 +187,13 @@ export class RPCProxy {
 			const cacheStats = await this.cacheManager.getStats();
 			const connectionStats = this.connectionPool.getStats();
 			const queueStats = this.requestQueues.getQueueStats();
-			const circuitBreakerStats = Array.from(this.circuitBreakers.entries()).map(([network, cb]) => ({
-				network,
-				...cb.getStats()
-			}));
-			
 			res.status(HTTP_STATUS.OK).json({
 				stats: this.stats,
 				cache: cacheStats,
 				client: this.httpClient.getClientInfo(),
 				optimizations: {
 					connectionPools: connectionStats,
-					requestQueues: queueStats,
-					circuitBreakers: circuitBreakerStats,
-					cacheWarmer: this.cacheWarmer.getStats()
+					requestQueues: queueStats
 				}
 			});
 		});
@@ -256,7 +223,7 @@ export class RPCProxy {
 					res.status(HTTP_STATUS.NOT_FOUND).json({ error: `Unknown network '${network}'` });
 					return;
 				}
-				await this.handleRPCRequestWithTarget(req, res, network, targetUrl);
+				await this.handleRPCRequestWithTarget(req, res, network);
 			}
 		);
 
@@ -277,7 +244,7 @@ export class RPCProxy {
 					});
 					return;
 				}
-				this.handleRPCRequestWithTarget(req, res, 'default', defaultUrl);
+				this.handleRPCRequestWithTarget(req, res, 'default');
 			}
 		);
 
@@ -285,19 +252,19 @@ export class RPCProxy {
 		this.app.use(this.errorResponder);
 	}
 
-	private async handleRPCRequestWithTarget(req: Request, res: Response, networkKey?: string, targetUrl?: string): Promise<void> {
+	private async handleRPCRequestWithTarget(req: Request, res: Response, networkKey?: string): Promise<void> {
 		const body = req.body as JSONRPCRequest | JSONRPCRequest[];
 		const start = Date.now();
 
 		try {
 			if (Array.isArray(body)) {
 				// Process batch requests in parallel with concurrency limit
-				const responses = await this.processBatchRequests(req, body, start, networkKey, targetUrl);
+				const responses = await this.processBatchRequests(req, body, start, networkKey);
 				res.status(HTTP_STATUS.OK).json(responses);
 				return;
 			}
 
-			const response = await this.processSingleRequest(req, body, start, networkKey, targetUrl);
+			const response = await this.processSingleRequest(req, body, start, networkKey);
 			res.status(HTTP_STATUS.OK).json(response);
 		} catch (err: any) {
 			const id = Array.isArray(body) ? null : (body as JSONRPCRequest).id ?? null;
@@ -315,19 +282,16 @@ export class RPCProxy {
 	}
 
 	private async processBatchRequests(
-		req: Request, 
+		req: Request,
 		requests: JSONRPCRequest[], 
 		startTs: number, 
-		networkKey?: string, 
-		targetUrl?: string
+		networkKey?: string
 	): Promise<JSONRPCResponse[]> {
 		// Apply subgraph-specific optimizations
 		const optimizedRequests = this.subgraphCacheStrategy.optimizeForSubgraph(requests);
 		
-		// Analyze request patterns for prefetching
-		optimizedRequests.forEach(request => {
-			this.subgraphPrefetcher.analyzeRequest(request, networkKey || 'default');
-		});
+		// Analyze request patterns for prefetching (simplified)
+		// Subgraph prefetcher removed - no analysis needed
 		
 		const concurrencyLimit = parseInt(process.env.BATCH_CONCURRENCY_LIMIT || '10');
 		const responses: JSONRPCResponse[] = [];
@@ -335,8 +299,8 @@ export class RPCProxy {
 		// Process requests in chunks to limit concurrency
 		for (let i = 0; i < optimizedRequests.length; i += concurrencyLimit) {
 			const chunk = optimizedRequests.slice(i, i + concurrencyLimit);
-			const chunkPromises = chunk.map(request => 
-				this.processSingleRequest(req, request, startTs, networkKey, targetUrl)
+			const chunkPromises = chunk.map((request: JSONRPCRequest) => 
+				this.processSingleRequest(req, request, startTs, networkKey)
 			);
 			
 			const chunkResults = await Promise.allSettled(chunkPromises);
@@ -372,7 +336,7 @@ export class RPCProxy {
 		return responses;
 	}
 
-	private async processSingleRequest(req: Request, request: JSONRPCRequest, startTs: number, networkKey?: string, targetUrl?: string): Promise<JSONRPCResponse> {
+	private async processSingleRequest(req: Request, request: JSONRPCRequest, startTs: number, networkKey?: string): Promise<JSONRPCResponse> {
 		const keyPrefix = networkKey ? `${networkKey}:` : '';
 		const cacheKey = keyPrefix + this.cacheManager.getCacheKey(request);
 
@@ -403,7 +367,7 @@ export class RPCProxy {
 					this.metrics.cacheHitsTotal.labels(methodLabel).inc();
 					this.metrics.requestsTotal.labels(methodLabel, 'HIT', 'success').inc();
 					this.metrics.requestDurationMs.labels(methodLabel, 'HIT').observe(duration);
-					this.logger.debug('RPC served from cache', {
+					this.logger.info('RPC served from cache', {
 						requestId: (req as any).requestId,
 						network: networkKey || 'default',
 						method: request.method,
@@ -422,16 +386,13 @@ export class RPCProxy {
 			const queueKey = networkKey || 'default';
 			
 			return this.requestQueues.addToQueue(queueKey, async () => {
-				// Use circuit breaker for upstream requests
-				const circuitBreaker = networkKey ? this.circuitBreakers.get(networkKey) : undefined;
-				
 				const executeRequest = async (): Promise<JSONRPCResponse> => {
 
 					// Get connection pool for this network
 					// const agent = this.connectionPool.getAgentForNetwork(queueKey);
 					
-					// Make upstream request with optimized connection
-					const upstreamResponse = await this.httpClient.makeRequest(request, undefined, undefined, targetUrl, networkKey);
+					// Make upstream request with network-specific logic
+					const upstreamResponse = await this.httpClient.makeRequest(request, undefined, undefined, undefined, networkKey);
 					const duration = Date.now() - startTs;
 					
 					// Record response size metrics
@@ -445,17 +406,16 @@ export class RPCProxy {
 					this.metrics.requestsTotal.labels(request.method, 'MISS', 'success').inc();
 					this.metrics.requestDurationMs.labels(request.method, 'MISS').observe(duration);
 
-					this.logger.info('RPC forwarded to upstream', {
-						requestId: (req as any).requestId,
-						network: networkKey || 'default',
+					// Log cache miss
+					this.logger.info('RPC served from upstream', {
 						method: request.method,
-						id: request.id,
-						statusCode: upstreamResponse.status,
-						duration,
-						responseSize,
-						cacheable: isCacheable,
+						requestId: request.id,
+						networkKey: networkKey || 'default',
 						cacheStatus: 'MISS',
+						duration,
+						cacheable: isCacheable
 					});
+
 
 					const rpcData = upstreamResponse.data as JSONRPCResponse;
 					if (isCacheable && rpcData && rpcData.result !== undefined) {
@@ -465,11 +425,7 @@ export class RPCProxy {
 					return rpcData;
 				};
 
-				if (circuitBreaker) {
-					return circuitBreaker.execute(executeRequest, `${networkKey}:${request.method}`);
-				} else {
-					return executeRequest();
-				}
+				return executeRequest();
 			});
 		})();
 
@@ -489,17 +445,42 @@ export class RPCProxy {
 		if (CACHEABLE_METHODS.TIME_CACHEABLE.includes(request.method as any)) {
 			return { isCacheable: true, maxAgeMs: this.config.cache.maxAge * 1000 };
 		}
-		if (request.method === 'eth_getLogs') {
-			return { isCacheable: true, maxAgeMs: this.config.cache.maxAge * 1000 };
-		}
-		if (request.method === 'eth_call') {
+		if (CACHEABLE_METHODS.HISTORICAL_CACHEABLE.includes(request.method as any)) {
+			// Check if it's a historical call (not "latest")
 			const params = Array.isArray(request.params) ? request.params : [];
-			const callObject = params.find((p) => typeof p === 'object' && p !== null) as Record<string, unknown> | undefined;
-			const hasBlockHash = !!callObject && Object.prototype.hasOwnProperty.call(callObject, 'blockHash');
-			const hasBlockNumber = !!params[1] && typeof params[1] === 'string' && params[1].startsWith('0x');
-			if (hasBlockHash || hasBlockNumber) {
-				return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
+			
+			// For eth_call, check the block parameter
+			if (request.method === 'eth_call') {
+				const blockParam = params[1];
+				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
+					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				}
+				return { isCacheable: true, maxAgeMs: 30000 }; // Latest = 30 seconds
 			}
+			
+			// For eth_getBlockByNumber, check if it's not "latest"
+			if (request.method === 'eth_getBlockByNumber') {
+				const blockParam = params[0];
+				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
+					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				}
+				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
+			}
+			
+			// For eth_getLogs, eth_getStorageAt, eth_getBalance - check for specific blocks
+			if (['eth_getLogs', 'eth_getStorageAt', 'eth_getBalance'].includes(request.method)) {
+				// Check if any parameter contains a specific block number (not "latest")
+				const hasSpecificBlock = params.some(param => 
+					typeof param === 'string' && param.startsWith('0x') && param !== 'latest'
+				);
+				if (hasSpecificBlock) {
+					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				}
+				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
+			}
+			
+			// Default for other historical methods
+			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		return { isCacheable: false, maxAgeMs: 0 };
 	}

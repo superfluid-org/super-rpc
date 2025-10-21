@@ -18,12 +18,31 @@ export interface ServerConfig {
   log_level?: string;
 }
 
+export interface UpstreamConfig {
+  url: string;
+  timeout?: number;
+  retries?: number;
+  retry_delay?: number;
+  weight?: number; // For load balancing
+  priority?: number; // For failover order
+}
+
+export interface NetworkConfig {
+  primary: UpstreamConfig;
+  fallbacks?: UpstreamConfig[];
+  timeout?: number;
+  retries?: number;
+  retry_delay?: number;
+  failover_strategy?: 'immediate' | 'circuit_breaker' | 'health_check';
+  health_check_interval?: number;
+}
+
 export interface RPCConfig {
   url: string;
   timeout: number;
   retries: number;
   initialTimeoutMs: number;
-  networks: Record<string, any>;
+  networks: Record<string, NetworkConfig>;
   batchConcurrencyLimit: number;
   batchTimeout: number;
 }

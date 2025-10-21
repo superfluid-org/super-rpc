@@ -26,6 +26,98 @@ export class HTTPClient {
     networkKey?: string
   ): Promise<AxiosResponse<JSONRPCResponse>> {
     const startTime = Date.now();
+    
+    // Simple fallback logic for networks
+    if (networkKey && this.config.rpc.networks[networkKey]) {
+      const networkConfig = this.config.rpc.networks[networkKey];
+      
+      // Try primary first
+      let response: AxiosResponse<JSONRPCResponse>;
+      let upstreamUsed = 'primary';
+      
+      try {
+        response = await this.tryUpstream(requestBody, networkConfig.primary.url, networkKey);
+        
+        // Smart fallback logic for subgraph syncing
+        const shouldTryFallback = this.shouldTryFallback(requestBody, response.data);
+        
+        if (shouldTryFallback && networkConfig.fallbacks) {
+          this.logger.debug('Primary returned historical data error, trying fallback', {
+            method: requestBody.method,
+            requestId: requestBody.id,
+            networkKey,
+            error: response.data?.error
+          });
+          
+          for (const fallback of networkConfig.fallbacks) {
+            try {
+              response = await this.tryUpstream(requestBody, fallback.url, networkKey);
+              if (response.data && response.data.result !== null) {
+                upstreamUsed = 'fallback';
+                break; // Found data, stop trying
+              }
+            } catch (fallbackError) {
+              this.logger.debug('Fallback upstream failed', {
+                method: requestBody.method,
+                requestId: requestBody.id,
+                networkKey,
+                fallbackUrl: fallback.url,
+                error: (fallbackError as Error).message
+              });
+              continue; // Try next fallback
+            }
+          }
+        }
+      } catch (primaryError) {
+        this.logger.debug('Primary upstream failed', {
+          method: requestBody.method,
+          requestId: requestBody.id,
+          networkKey,
+          primaryUrl: networkConfig.primary.url,
+          error: (primaryError as Error).message
+        });
+        
+        // Try fallbacks if primary fails
+        if (networkConfig.fallbacks) {
+          for (const fallback of networkConfig.fallbacks) {
+            try {
+              response = await this.tryUpstream(requestBody, fallback.url, networkKey);
+              upstreamUsed = 'fallback';
+              break; // Found working fallback
+            } catch (fallbackError) {
+              this.logger.debug('Fallback upstream failed', {
+                method: requestBody.method,
+                requestId: requestBody.id,
+                networkKey,
+                fallbackUrl: fallback.url,
+                error: (fallbackError as Error).message
+              });
+              continue; // Try next fallback
+            }
+          }
+          
+          // If all fallbacks failed, throw the last error
+          if (!response!) {
+            throw primaryError;
+          }
+        } else {
+          throw primaryError;
+        }
+      }
+      
+      // Log which upstream was used
+      this.logger.info('RPC request completed', {
+        method: requestBody.method,
+        requestId: requestBody.id,
+        networkKey,
+        upstreamUsed,
+        hasResult: response.data && response.data.result !== null
+      });
+      
+      return response;
+    }
+    
+    // Fallback to single URL
     const url = targetUrl || this.config.rpc.url;
     
     // Get appropriate agent for the network
@@ -162,6 +254,65 @@ export class HTTPClient {
     (error as any).isRetryable = !this.shouldNotRetry(axiosError);
 
     return error;
+  }
+
+  // Smart fallback logic for subgraph syncing
+  private shouldTryFallback(requestBody: JSONRPCRequest, responseData: any): boolean {
+    // Only for eth_call method
+    if (requestBody.method !== 'eth_call') return false;
+    
+    const params = Array.isArray(requestBody.params) ? requestBody.params : [];
+    const blockParam = params[1];
+    
+    // Check if it's a historical call (not "latest" or "pending")
+    const isHistorical = blockParam && 
+                         blockParam !== 'latest' && 
+                         blockParam !== 'pending' &&
+                         typeof blockParam === 'string';
+    
+    if (isHistorical) {
+      // Try fallback for JSON-RPC errors on historical calls
+      if (responseData?.error?.code === -32000) {
+        return true; // "missing trie node" error
+      }
+      
+      // Try fallback for other common historical data errors
+      if (responseData?.error?.code === -32801) {
+        return true; // "no historical RPC available" error
+      }
+    }
+    
+    return false;
+  }
+
+  // Simple upstream try method
+  private async tryUpstream(
+    requestBody: JSONRPCRequest,
+    url: string,
+    networkKey: string
+  ): Promise<AxiosResponse<JSONRPCResponse>> {
+    // Get appropriate agent for the network
+    let httpAgent, httpsAgent;
+    if (this.connectionPool) {
+      const agent = this.connectionPool.getAgentForNetwork(networkKey);
+      httpAgent = agent.httpAgent;
+      httpsAgent = agent.httpsAgent;
+    }
+    
+    return await axios.post<JSONRPCResponse>(
+      url,
+      requestBody,
+      {
+        timeout: this.config.rpc.timeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'RPC-Proxy/1.0.0',
+        },
+        httpAgent,
+        httpsAgent,
+        validateStatus: (status) => status < 500,
+      }
+    );
   }
 
   // Health check method for upstream connectivity

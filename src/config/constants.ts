@@ -20,10 +20,17 @@ export const CACHEABLE_METHODS = {
     'eth_chainId',
     'net_version',
     'eth_getTransactionReceipt',
+    'eth_getTransactionByHash', // Transaction data never changes
+  ],
+  HISTORICAL_CACHEABLE: [
+    'eth_call', // Historical calls cached forever
+    'eth_getBlockByNumber', // Historical blocks cached forever
+    'eth_getLogs', // Historical logs cached forever
+    'eth_getStorageAt', // Historical storage cached forever
+    'eth_getBalance', // Historical balance cached forever
   ],
   TIME_CACHEABLE: [
-    'eth_blockNumber',
-    'eth_call',
+    'eth_blockNumber', // Latest block number (5 minutes)
   ],
 } as const;
 

@@ -107,8 +107,13 @@ export class ConfigManager {
       for (const [key, value] of Object.entries(yamlNetworks)) {
         if (typeof value === 'string') {
           networks[key] = { url: value, timeout: 30000, retries: 3, retry_delay: 1000 };
-        } else if (typeof value === 'object' && value !== null && 'url' in value) {
-          networks[key] = value;
+        } else if (typeof value === 'object' && value !== null) {
+          // Support both old format (url) and new format (primary/fallbacks)
+          if ('url' in value) {
+            networks[key] = value;
+          } else if ('primary' in value) {
+            networks[key] = value;
+          }
         }
       }
     }

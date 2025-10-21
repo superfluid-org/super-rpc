@@ -12,7 +12,6 @@ export function createRequestLogger(logger: Logger) {
 
     res.on('finish', () => {
       const duration = Date.now() - startTime;
-      const level = duration > 1000 ? 'warn' : 'info';
       const meta = {
         requestId,
         method: req.method,
@@ -21,7 +20,7 @@ export function createRequestLogger(logger: Logger) {
         duration,
         rpcMethod: req.body?.method,
       } as const;
-      (logger as any)[level]('Request completed', meta);
+      logger.debug('Request completed', meta);
     });
 
     next();
