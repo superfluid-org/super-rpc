@@ -29,7 +29,7 @@ export interface UpstreamConfig {
 
 export interface NetworkConfig {
   primary: UpstreamConfig;
-  fallbacks?: UpstreamConfig[];
+  fallback?: UpstreamConfig;
   timeout?: number;
   retries?: number;
   retry_delay?: number;

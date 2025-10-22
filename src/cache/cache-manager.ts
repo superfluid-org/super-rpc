@@ -99,8 +99,14 @@ export class CacheManager {
       }
     }
     
+    // Fast path for eth_getBlockReceipts
+    if (method === 'eth_getBlockReceipts' && params.length === 1) {
+      const blockParam = params[0];
+      return `${method}:${blockParam}`;
+    }
+    
     // Fallback to hash for complex cases
-    const content = `${method}:${JSON.stringify(params)}`;
+    const content = `${method}:${JSON.stringify(params, null, 0)}`;
     return createHash('sha256').update(content).digest('hex').substring(0, 16);
   }
 

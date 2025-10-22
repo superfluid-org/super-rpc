@@ -418,7 +418,8 @@ export class RPCProxy {
 
 
 					const rpcData = upstreamResponse.data as JSONRPCResponse;
-					if (isCacheable && rpcData && rpcData.result !== undefined) {
+					// Only cache successful responses with actual results (not null, undefined, or errors)
+					if (isCacheable && rpcData && rpcData.result !== undefined && rpcData.result !== null && !rpcData.error) {
 						await this.cacheManager.writeToCache(cacheKey, rpcData.result);
 					}
 

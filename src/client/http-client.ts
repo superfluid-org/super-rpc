@@ -41,7 +41,7 @@ export class HTTPClient {
         // Smart fallback logic for subgraph syncing
         const shouldTryFallback = this.shouldTryFallback(requestBody, response.data);
         
-        if (shouldTryFallback && networkConfig.fallbacks) {
+        if (shouldTryFallback && networkConfig.fallback) {
           this.logger.debug('Primary returned historical data error, trying fallback', {
             method: requestBody.method,
             requestId: requestBody.id,
@@ -49,23 +49,19 @@ export class HTTPClient {
             error: response.data?.error
           });
           
-          for (const fallback of networkConfig.fallbacks) {
-            try {
-              response = await this.tryUpstream(requestBody, fallback.url, networkKey);
-              if (response.data && response.data.result !== null) {
-                upstreamUsed = 'fallback';
-                break; // Found data, stop trying
-              }
-            } catch (fallbackError) {
-              this.logger.debug('Fallback upstream failed', {
-                method: requestBody.method,
-                requestId: requestBody.id,
-                networkKey,
-                fallbackUrl: fallback.url,
-                error: (fallbackError as Error).message
-              });
-              continue; // Try next fallback
+          try {
+            response = await this.tryUpstream(requestBody, networkConfig.fallback.url, networkKey);
+            if (response.data && response.data.result !== null) {
+              upstreamUsed = 'fallback';
             }
+          } catch (fallbackError) {
+            this.logger.debug('Fallback upstream failed', {
+              method: requestBody.method,
+              requestId: requestBody.id,
+              networkKey,
+              fallbackUrl: networkConfig.fallback.url,
+              error: (fallbackError as Error).message
+            });
           }
         }
       } catch (primaryError) {
@@ -77,28 +73,20 @@ export class HTTPClient {
           error: (primaryError as Error).message
         });
         
-        // Try fallbacks if primary fails
-        if (networkConfig.fallbacks) {
-          for (const fallback of networkConfig.fallbacks) {
-            try {
-              response = await this.tryUpstream(requestBody, fallback.url, networkKey);
-              upstreamUsed = 'fallback';
-              break; // Found working fallback
-            } catch (fallbackError) {
-              this.logger.debug('Fallback upstream failed', {
-                method: requestBody.method,
-                requestId: requestBody.id,
-                networkKey,
-                fallbackUrl: fallback.url,
-                error: (fallbackError as Error).message
-              });
-              continue; // Try next fallback
-            }
-          }
-          
-          // If all fallbacks failed, throw the last error
-          if (!response!) {
-            throw primaryError;
+        // Try fallback if primary fails
+        if (networkConfig.fallback) {
+          try {
+            response = await this.tryUpstream(requestBody, networkConfig.fallback.url, networkKey);
+            upstreamUsed = 'fallback';
+          } catch (fallbackError) {
+            this.logger.debug('Fallback upstream failed', {
+              method: requestBody.method,
+              requestId: requestBody.id,
+              networkKey,
+              fallbackUrl: networkConfig.fallback.url,
+              error: (fallbackError as Error).message
+            });
+            throw primaryError; // If fallback fails, throw original primary error
           }
         } else {
           throw primaryError;
@@ -258,17 +246,24 @@ export class HTTPClient {
 
   // Smart fallback logic for subgraph syncing
   private shouldTryFallback(requestBody: JSONRPCRequest, responseData: any): boolean {
-    // Only for eth_call method
-    if (requestBody.method !== 'eth_call') return false;
+    // Subgraph-critical methods that need fallback
+    const subgraphCriticalMethods = [
+      'eth_call',
+      'eth_getLogs', 
+      'eth_getBlockByNumber',
+      'eth_getBlockByHash',
+      'eth_getBlockReceipts',
+      'eth_getTransactionReceipt',
+      'eth_getStorageAt',
+      'eth_getBalance'
+    ];
+    
+    if (!subgraphCriticalMethods.includes(requestBody.method)) return false;
     
     const params = Array.isArray(requestBody.params) ? requestBody.params : [];
-    const blockParam = params[1];
     
-    // Check if it's a historical call (not "latest" or "pending")
-    const isHistorical = blockParam && 
-                         blockParam !== 'latest' && 
-                         blockParam !== 'pending' &&
-                         typeof blockParam === 'string';
+    // Check if it's a historical request (not "latest" or "pending")
+    const isHistorical = this.isHistoricalRequest(params);
     
     if (isHistorical) {
       // Try fallback for JSON-RPC errors on historical calls
@@ -279,6 +274,41 @@ export class HTTPClient {
       // Try fallback for other common historical data errors
       if (responseData?.error?.code === -32801) {
         return true; // "no historical RPC available" error
+      }
+      
+      // Try fallback for empty results on historical requests
+      if (responseData?.result === null || responseData?.result === undefined) {
+        return true; // Missing data
+      }
+      
+      // For eth_getLogs, try fallback if empty array (might indicate missing events)
+      if (requestBody.method === 'eth_getLogs' && Array.isArray(responseData?.result) && responseData.result.length === 0) {
+        return true; // Empty logs might indicate missing events
+      }
+    }
+    
+    return false;
+  }
+
+  private isHistoricalRequest(params: any[]): boolean {
+    // Check for historical block parameters
+    const historicalBlockParams = ['fromBlock', 'toBlock', 'blockNumber', 'blockHash'];
+    
+    for (const param of params) {
+      if (typeof param === 'string') {
+        // Check if it's a specific block number/hash (not "latest" or "pending")
+        if (param !== 'latest' && param !== 'pending' && param.startsWith('0x')) {
+          return true;
+        }
+      }
+      
+      if (typeof param === 'object' && param !== null) {
+        // Check object parameters for historical blocks
+        for (const key of historicalBlockParams) {
+          if (param[key] && param[key] !== 'latest' && param[key] !== 'pending') {
+            return true;
+          }
+        }
       }
     }
     
