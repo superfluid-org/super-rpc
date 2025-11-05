@@ -27,10 +27,10 @@ export class PrometheusMetrics {
 	init(): void {
 		if (this.initialized) return;
 
-		// Default process metrics
-		client.collectDefaultMetrics({
-			prefix: 'rpc_',
-		});
+		// Default process metrics disabled - only custom metrics are collected
+		// client.collectDefaultMetrics({
+		// 	prefix: 'rpc_',
+		// });
 
 		this.requestsTotal = new client.Counter({
 			name: 'rpc_http_requests_total',

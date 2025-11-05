@@ -32,16 +32,18 @@ rpc:
   # Single RPC URL
   url: "https://mainnet.base.org"
   
-  # Multi-network setup
+  # Multi-network setup with primary/fallback
   networks:
     base-mainnet:
-      url: "https://mainnet.base.org"
-      timeout: 30000
-      retries: 3
+      primary:
+        url: "https://mainnet.base.org"
+      fallback:
+        url: "https://base-mainnet.g.alchemy.com/v2/demo"
     polygon-mainnet:
-      url: "https://polygon-rpc.com"
-      timeout: 30000
-      retries: 3
+      primary:
+        url: "https://polygon-rpc.com"
+      fallback:
+        url: "https://polygon-mainnet.g.alchemy.com/v2/demo"
 
 cache:
   max_age: 300000  # 5 minutes
@@ -84,13 +86,22 @@ HELMET_ENABLED=false         # Disable security headers
 
 **Note**: Multi-network configuration is now handled through YAML only. Environment variable `RPC_NETWORKS` is deprecated.
 
+### Failover Behavior
+
+The proxy uses **immediate failover** - no retries on primary:
+- Primary fails → **immediately** tries fallback
+- Primary returns invalid data → **automatically** tries fallback
+- Fallback has retries (for transient errors)
+- Smart detection of historical data errors (missing trie node, etc.)
+
 ## 🎯 Key Features
 
 - **10-100x faster cache hits** than cache misses
-- **Intelligent caching** for immutable blockchain data
+- **Intelligent caching** for immutable blockchain data (historical data cached forever)
 - **Batch request processing** with parallel execution
-- **Optimized caching** for historical block data
-- **Automatic failover** with primary/fallback upstreams
+- **Automatic failover** with immediate primary/fallback switching
+- **Smart fallback detection** for historical data errors (missing trie node, etc.)
+- **No retries on primary** - immediate failover on failure for faster response
 
 ## 📊 Usage
 
@@ -100,10 +111,23 @@ curl -X POST http://localhost:3000/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
 
-# Test multi-network
+# Test multi-network with primary/fallback
 curl -X POST http://localhost:3000/base-mainnet \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
+
+# Test historical data (triggers fallback if primary lacks archive node)
+curl -X POST http://localhost:3000/base-mainnet \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_call",
+    "params": [
+      {"to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "data": "0x18160ddd"},
+      "0xF4240"
+    ],
+    "id": 1
+  }'
 
 # Test batch requests
 curl -X POST http://localhost:3000/ \
