@@ -1,0 +1,115 @@
+# RPC Proxy Configuration Sample
+# Copy this file to config.yaml and customize as needed
+
+server:
+  port: 3000
+  host: "0.0.0.0"
+  environment: "production"  # production, development
+  log_level: "info"  # error, warn, info, debug, silly
+
+rpc:
+  # Single RPC URL (for simple setups)
+  url: "https://mainnet.base.org"
+  
+  # Multi-network configuration with primary/fallback upstreams
+  networks:
+    base-mainnet:
+      primary:
+        url: "https://mainnet.base.org"
+        timeout: 30000
+        retries: 3
+        retry_delay: 1000
+      fallback:
+        url: "https://base-mainnet.g.alchemy.com/v2/demo"
+        timeout: 30000
+        retries: 2
+        retry_delay: 1500
+      failover_strategy: "circuit_breaker"  # immediate, circuit_breaker, health_check
+      health_check_interval: 30000
+    polygon-mainnet:
+      primary:
+        url: "https://polygon-rpc.com"
+        timeout: 30000
+        retries: 3
+        retry_delay: 1000
+      fallback:
+        url: "https://polygon-mainnet.g.alchemy.com/v2/demo"
+        timeout: 30000
+        retries: 2
+        retry_delay: 1500
+      failover_strategy: "circuit_breaker"
+      health_check_interval: 30000
+    scroll-sepolia:
+      primary:
+        url: "https://scroll-sepolia.g.alchemy.com"
+        timeout: 30000
+        retries: 3
+        retry_delay: 1000
+      fallbacks:
+        - url: "https://sepolia-rpc.scroll.io"
+          timeout: 30000
+          retries: 2
+          retry_delay: 1500
+      failover_strategy: "immediate"
+      health_check_interval: 60000
+    ethereum-mainnet:
+      primary:
+        url: "https://mainnet.infura.io/v3/YOUR_KEY"
+        timeout: 30000
+        retries: 3
+        retry_delay: 1000
+      fallbacks:
+        - url: "https://eth-mainnet.g.alchemy.com/v2/demo"
+          timeout: 30000
+          retries: 2
+          retry_delay: 1500
+        - url: "https://ethereum.blockpi.network/v1/rpc/public"
+          timeout: 25000
+          retries: 2
+          retry_delay: 2000
+      failover_strategy: "circuit_breaker"
+      health_check_interval: 30000
+  
+  # Global RPC settings
+  timeout: 30000
+  retries: 3
+  initial_timeout_ms: 5000
+  batch_concurrency_limit: 10
+  batch_timeout: 5000
+
+cache:
+  max_age: 300000  # 5 minutes in milliseconds
+  db_file: "./cache.db"
+  max_size: 1000
+  enable_db: true
+
+rate_limit:
+  window_ms: 60000  # 1 minute
+  max_requests: 100
+
+cors:
+  enabled: true
+  origin: "*"  # or specific domain
+  credentials: false
+
+helmet:
+  enabled: true
+  content_security_policy: true
+
+# Optional: Metrics configuration
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+# Optional: Health check configuration
+health:
+  enabled: true
+  path: "/health"
+  timeout: 5000
+
+# Optional: Request logging
+logging:
+  requests: true
+  performance: true
+  errors: true
