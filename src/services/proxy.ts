@@ -24,7 +24,6 @@ export class RPCProxy {
 	private readonly cacheManager = new CacheManager(this.config, this.logger);
 	private readonly httpClient: HTTPClient;
 	private readonly metrics = PrometheusMetrics.getInstance();
-	private readonly startedAt = Date.now();
 	private readonly inflight: Map<string, Promise<JSONRPCResponse>> = new Map();
 	private readonly networkMap: Record<string, string> = {};
 	
@@ -180,22 +179,6 @@ export class RPCProxy {
 		this.app.get('/metrics', async (_req: Request, res: Response) => {
 			res.setHeader('Content-Type', this.metrics.getRegister().contentType);
 			res.end(await this.metrics.getRegister().metrics());
-		});
-
-		this.app.get('/stats', async (_req: Request, res: Response) => {
-			this.stats.uptime = Math.floor((Date.now() - this.startedAt) / 1000);
-			const cacheStats = await this.cacheManager.getStats();
-			const connectionStats = this.connectionPool.getStats();
-			const queueStats = this.requestQueues.getQueueStats();
-			res.status(HTTP_STATUS.OK).json({
-				stats: this.stats,
-				cache: cacheStats,
-				client: this.httpClient.getClientInfo(),
-				optimizations: {
-					connectionPools: connectionStats,
-					requestQueues: queueStats
-				}
-			});
 		});
 
 		this.app.get('/cache/stats', async (_req: Request, res: Response) => {

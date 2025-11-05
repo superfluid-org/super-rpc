@@ -14,7 +14,7 @@ cp config.sample.yaml config.yaml
 
 # Build and run
 npm run build
-npm start
+npm run start
 ```
 
 ## ⚙️ Configuration
@@ -62,14 +62,6 @@ helmet:
   enabled: true
   content_security_policy: true
 ```
-
-### Configuration File Locations
-
-The system looks for configuration files in this order:
-1. `./config.yaml` (project root)
-2. `./config.yml` (project root)
-3. `../config.yaml` (relative to dist)
-4. `../config.yml` (relative to dist)
 
 ### Environment Variables (Override YAML)
 
@@ -131,21 +123,7 @@ curl -X POST http://localhost:3000/base-mainnet \
     ],
     "id": 1
   }'
-
-# Test batch requests
-curl -X POST http://localhost:3000/ \
-  -H "Content-Type: application/json" \
-  -d '[
-    {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-    {"jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 2}
-  ]'
 ```
-
-## 📈 Metrics
-
-- **Health**: `http://localhost:3000/health`
-- **Metrics**: `http://localhost:3000/metrics`
-- **Stats**: `http://localhost:3000/stats`
 
 ## 🧪 Testing
 
@@ -153,4 +131,7 @@ curl -X POST http://localhost:3000/ \
 ./test-augmented-rpc.sh
 ```
 
-Perfect for high-throughput workloads that need fast, reliable RPC access with intelligent caching and automatic failover.
+## 📈 Metrics
+
+- **Health**: `http://localhost:3000/health`
+- **Metrics**: `http://localhost:3000/metrics`
