@@ -1,5 +1,5 @@
 {
-  "name": "augmented-rpc",
+  "name": "super-rpc",
   "version": "1.0.0",
   "description": "Middleware for EVM RPCs",
   "main": "dist/index.js",

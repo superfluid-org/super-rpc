@@ -1,4 +1,4 @@
-# Augmented RPC Proxy
+# superRPC
 
 A high-performance JSON-RPC proxy with intelligent caching and failover for EVM blockchain interactions.
 
@@ -46,7 +46,7 @@ rpc:
         url: "https://polygon-mainnet.g.alchemy.com/v2/demo"
 
 cache:
-  max_age: 300000  # 5 minutes
+  max_age: 300000  # 5 minutes (does not apply to cache-forever methods)
   enable_db: true
 
 rate_limit:
@@ -86,6 +86,18 @@ HELMET_ENABLED=false         # Disable security headers
 
 **Note**: Multi-network configuration is now handled through YAML only. Environment variable `RPC_NETWORKS` is deprecated.
 
+### Cache TTL Behavior
+
+The `cache.max_age` setting (default: 5 minutes) applies only to time-cacheable methods like `eth_blockNumber`. 
+
+**Cache-forever methods** (immutable blockchain data) are cached indefinitely and ignore the `max_age` setting:
+- **Infinitely cacheable**: `eth_chainId`, `net_version`, `eth_getTransactionReceipt`, `eth_getTransactionByHash`, `eth_getBlockReceipts`
+- **Historical data** (when using specific block numbers, not "latest"): `eth_call`, `eth_getBlockByNumber`, `eth_getLogs`, `eth_getStorageAt`, `eth_getBalance`
+
+For example, `eth_call` with a historical block number (e.g., `"0xF4240"`) is cached forever, while `eth_call` with `"latest"` uses a 30-second TTL.
+
+See [`src/config/constants.ts`](src/config/constants.ts) for the complete list of cacheable methods and their configurations.
+
 ### Failover Behavior
 
 The proxy uses **immediate failover** - no retries on primary:
@@ -93,15 +105,6 @@ The proxy uses **immediate failover** - no retries on primary:
 - Primary returns invalid data → **automatically** tries fallback
 - Fallback has retries (for transient errors)
 - Smart detection of historical data errors (missing trie node, etc.)
-
-## 🎯 Key Features
-
-- **10-100x faster cache hits** than cache misses
-- **Intelligent caching** for immutable blockchain data (historical data cached forever)
-- **Batch request processing** with parallel execution
-- **Automatic failover** with immediate primary/fallback switching
-- **Smart fallback detection** for historical data errors (missing trie node, etc.)
-- **No retries on primary** - immediate failover on failure for faster response
 
 ## 📊 Usage
 

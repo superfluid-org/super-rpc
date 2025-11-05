@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Test script for Augmented RPC Proxy with comprehensive test cases
+# Test script for superRPC with comprehensive test cases
 BASE_URL="http://localhost:3000"
 
-echo "Testing Augmented RPC Proxy"
+echo "Testing superRPC"
 echo "=========================="
 
 # Test 1: Basic block number
