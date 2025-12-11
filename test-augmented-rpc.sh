@@ -5,7 +5,7 @@
 # Example: ./test-augmented-rpc.sh base-mainnet
 #          ./test-augmented-rpc.sh polygon-mainnet
 
-BASE_URL="http://localhost:3000"
+BASE_URL="http://localhost:4500"
 
 # Network selection: use argument if provided, otherwise use default endpoint
 if [ -n "$1" ]; then

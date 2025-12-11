@@ -25,7 +25,7 @@ Create a `config.yaml` file in the project root:
 
 ```yaml
 server:
-  port: 3000
+  port: 4500
   host: "0.0.0.0"
 
 rpc:
@@ -76,7 +76,7 @@ The system looks for configuration files in this order:
 Environment variables override YAML settings:
 
 ```bash
-PORT=3000                    # Server port
+PORT=4500                    # Server port
 RPC_URL=https://...          # Single RPC endpoint
 CACHE_MAX_AGE=300000         # Cache TTL (milliseconds)
 ENABLE_DB_CACHE=true         # Enable SQLite cache
@@ -107,17 +107,17 @@ The proxy uses **immediate failover** - no retries on primary:
 
 ```bash
 # Test basic functionality
-curl -X POST http://localhost:3000/ \
+curl -X POST http://localhost:4500/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
 
 # Test multi-network with primary/fallback
-curl -X POST http://localhost:3000/base-mainnet \
+curl -X POST http://localhost:4500/base-mainnet \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
 
 # Test historical data (triggers fallback if primary lacks archive node)
-curl -X POST http://localhost:3000/base-mainnet \
+curl -X POST http://localhost:4500/base-mainnet \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -130,7 +130,7 @@ curl -X POST http://localhost:3000/base-mainnet \
   }'
 
 # Test batch requests
-curl -X POST http://localhost:3000/ \
+curl -X POST http://localhost:4500/ \
   -H "Content-Type: application/json" \
   -d '[
     {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
@@ -140,9 +140,9 @@ curl -X POST http://localhost:3000/ \
 
 ## Metrics
 
-- **Health**: `http://localhost:3000/health`
-- **Metrics**: `http://localhost:3000/metrics`
-- **Stats**: `http://localhost:3000/stats`
+- **Health**: `http://localhost:4500/health`
+- **Metrics**: `http://localhost:4500/metrics`
+- **Stats**: `http://localhost:4500/stats`
 
 ## Testing
 
