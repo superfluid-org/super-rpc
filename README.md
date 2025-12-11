@@ -2,7 +2,7 @@
 
 A high-performance JSON-RPC proxy with intelligent caching and failover for EVM blockchain interactions.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Install dependencies
@@ -17,7 +17,7 @@ npm run build
 npm run start
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 ### YAML Configuration (Recommended)
 
@@ -25,7 +25,7 @@ Create a `config.yaml` file in the project root:
 
 ```yaml
 server:
-  port: 3000
+  port: 4500
   host: "0.0.0.0"
 
 rpc:
@@ -68,7 +68,7 @@ helmet:
 Environment variables override YAML settings:
 
 ```bash
-PORT=3000                    # Server port
+PORT=4500                    # Server port
 RPC_URL=https://...          # Single RPC endpoint
 CACHE_MAX_AGE=300000         # Cache TTL (milliseconds)
 ENABLE_DB_CACHE=true         # Enable SQLite cache
@@ -98,21 +98,30 @@ The proxy uses **immediate failover** - no retries on primary:
 - Fallback has retries (for transient errors)
 - Smart detection of historical data errors (missing trie node, etc.)
 
-## 📊 Usage
+## Key Features
+
+- **10-100x faster cache hits** than cache misses
+- **Intelligent caching** for immutable blockchain data (historical data cached forever)
+- **Batch request processing** with parallel execution
+- **Automatic failover** with immediate primary/fallback switching
+- **Smart fallback detection** for historical data errors (missing trie node, etc.)
+- **No retries on primary** - immediate failover on failure for faster response
+
+## Usage
 
 ```bash
 # Test basic functionality
-curl -X POST http://localhost:3000/ \
+curl -X POST http://localhost:4500/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
 
 # Test multi-network with primary/fallback
-curl -X POST http://localhost:3000/base-mainnet \
+curl -X POST http://localhost:4500/base-mainnet \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}'
 
 # Test historical data (triggers fallback if primary lacks archive node)
-curl -X POST http://localhost:3000/base-mainnet \
+curl -X POST http://localhost:4500/base-mainnet \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -123,9 +132,23 @@ curl -X POST http://localhost:3000/base-mainnet \
     ],
     "id": 1
   }'
+
+# Test batch requests
+curl -X POST http://localhost:4500/ \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+    {"jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 2}
+  ]'
 ```
 
-## 🧪 Testing
+## Metrics
+
+- **Health**: `http://localhost:4500/health`
+- **Metrics**: `http://localhost:4500/metrics`
+- **Stats**: `http://localhost:4500/stats`
+
+## Testing
 
 ```bash
 ./test-augmented-rpc.sh

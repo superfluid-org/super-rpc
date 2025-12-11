@@ -6,10 +6,16 @@ dist/
 build/
 data/
 
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo
+*.d.ts.map
+
 # Environment variables
 .env
 .env.local
 
 # configurations
+config.yaml
 rpc.networks.json
 cache.sqlite
