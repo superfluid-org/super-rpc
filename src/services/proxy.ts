@@ -424,7 +424,11 @@ export class RPCProxy {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		if (CACHEABLE_METHODS.TIME_CACHEABLE.includes(request.method as any)) {
-			return { isCacheable: true, maxAgeMs: this.config.cache.maxAge * 1000 };
+			// If maxAge is 0, treat as infinite
+			const maxAgeMs = this.config.cache.maxAge === 0 
+				? Number.POSITIVE_INFINITY 
+				: this.config.cache.maxAge * 1000;
+			return { isCacheable: true, maxAgeMs };
 		}
 		if (CACHEABLE_METHODS.HISTORICAL_CACHEABLE.includes(request.method as any)) {
 			// Check if it's a historical call (not "latest")

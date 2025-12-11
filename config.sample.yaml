@@ -78,10 +78,11 @@ rpc:
   batch_timeout: 5000
 
 cache:
-  max_age: 300000  # 5 minutes in milliseconds
-  db_file: "./cache.db"
-  max_size: 1000
+  max_age: 0  # 0 = infinite (no expiry)
+  db_file: "./data/.cache.sqlite"
+  max_size: 999999999  # Very large number = effectively unlimited
   enable_db: true
+
 
 rate_limit:
   window_ms: 60000  # 1 minute
@@ -99,7 +100,6 @@ helmet:
 # Optional: Metrics configuration
 metrics:
   enabled: true
-  port: 9090
   path: "/metrics"
 
 # Optional: Health check configuration

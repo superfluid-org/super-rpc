@@ -41,6 +41,11 @@ export class CacheManager {
   }
 
   private async cleanupExpiredEntries(): Promise<void> {
+    // If maxAge is 0, skip cleanup (infinite cache)
+    if (this.config.cache.maxAge === 0) {
+      return;
+    }
+    
     const maxAge = this.config.cache.maxAge * 1000;
     
     // Cleanup database cache
