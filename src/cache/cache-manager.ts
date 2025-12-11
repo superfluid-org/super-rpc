@@ -88,7 +88,11 @@ export class CacheManager {
       const callObject = params[0] as any;
       const blockTag = params[1];
       if (callObject && typeof callObject === 'object' && callObject.to && callObject.data) {
-        return `${method}:${callObject.to}:${callObject.data}:${blockTag}`;
+        // Handle blockTag - convert object to JSON string if needed, otherwise use as string
+        const blockTagStr = typeof blockTag === 'object' && blockTag !== null 
+          ? JSON.stringify(blockTag) 
+          : String(blockTag);
+        return `${method}:${callObject.to}:${callObject.data}:${blockTagStr}`;
       }
     }
     
