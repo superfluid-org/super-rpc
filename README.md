@@ -2,7 +2,7 @@
 
 A high-performance JSON-RPC proxy with intelligent caching and failover for EVM blockchain interactions.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Install dependencies
@@ -17,7 +17,7 @@ npm run build
 npm start
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 ### YAML Configuration (Recommended)
 
@@ -94,7 +94,7 @@ The proxy uses **immediate failover** - no retries on primary:
 - Fallback has retries (for transient errors)
 - Smart detection of historical data errors (missing trie node, etc.)
 
-## 🎯 Key Features
+## Key Features
 
 - **10-100x faster cache hits** than cache misses
 - **Intelligent caching** for immutable blockchain data (historical data cached forever)
@@ -103,7 +103,7 @@ The proxy uses **immediate failover** - no retries on primary:
 - **Smart fallback detection** for historical data errors (missing trie node, etc.)
 - **No retries on primary** - immediate failover on failure for faster response
 
-## 📊 Usage
+## Usage
 
 ```bash
 # Test basic functionality
@@ -138,13 +138,13 @@ curl -X POST http://localhost:3000/ \
   ]'
 ```
 
-## 📈 Metrics
+## Metrics
 
 - **Health**: `http://localhost:3000/health`
 - **Metrics**: `http://localhost:3000/metrics`
 - **Stats**: `http://localhost:3000/stats`
 
-## 🧪 Testing
+## Testing
 
 ```bash
 ./test-augmented-rpc.sh

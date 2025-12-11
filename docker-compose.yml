@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  augmented-rpc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: augmented-rpc
+    ports:
+      - "3000:3000"
+      - "9091:9090"  # Metrics port
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      # Persist cache database
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DB_FILE=/app/data/cache.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - augmented-rpc-network
+
+networks:
+  augmented-rpc-network:
+    driver: bridge
+

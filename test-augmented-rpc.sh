@@ -1,14 +1,33 @@
 #!/bin/bash
 
 # Test script for Augmented RPC Proxy with comprehensive test cases
+# Usage: ./test-augmented-rpc.sh [network]
+# Example: ./test-augmented-rpc.sh base-mainnet
+#          ./test-augmented-rpc.sh polygon-mainnet
+
 BASE_URL="http://localhost:3000"
 
-echo "Testing Augmented RPC Proxy"
+# Network selection: use argument if provided, otherwise use default endpoint
+if [ -n "$1" ]; then
+  NETWORK="$1"
+  ENDPOINT="${BASE_URL}/${NETWORK}"
+  echo "Testing Augmented RPC Proxy - Network: ${NETWORK}"
+else
+  NETWORK="default"
+  ENDPOINT="${BASE_URL}"
+  echo "Testing Augmented RPC Proxy - Default endpoint (uses RPC_URL or first network)"
+fi
+
 echo "=========================="
+echo "Base URL: ${BASE_URL}"
+echo "Endpoint: ${ENDPOINT}"
+echo "Network: ${NETWORK}"
+echo "=========================="
+echo ""
 
 # Test 1: Basic block number
 echo "Test 1: Basic block number"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}' \
   | jq '.'
@@ -17,7 +36,7 @@ echo -e "\n"
 
 # Test 2: Get logs with valid Ethereum address (USDC contract on Base)
 echo "Test 2: Get logs (USDC contract)"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -34,7 +53,7 @@ echo -e "\n"
 
 # Test 3: Get logs with Transfer event topic
 echo "Test 3: Get logs with Transfer event"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -52,7 +71,7 @@ echo -e "\n"
 
 # Test 4: Batch request
 echo "Test 4: Batch request (parallel processing)"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '[
     {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
@@ -65,31 +84,31 @@ echo -e "\n"
 # Test 5: Cache performance test
 echo "Test 5: Cache performance test"
 echo "First request (cache miss):"
-time curl -s -X POST $BASE_URL/ \
+time curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 4}' \
   | jq '.'
 
 echo "Second request (cache hit):"
-time curl -s -X POST $BASE_URL/ \
+time curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 5}' \
   | jq '.'
 
 echo -e "\n"
 
-# Test 6: Multi-network request (Base)
-echo "Test 6: Multi-network request (Base)"
-curl -s -X POST $BASE_URL/base-mainnet \
+# Test 6: Chain ID verification
+echo "Test 6: Chain ID verification"
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 6}' \
+  -d '{"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 6}' \
   | jq '.'
 
 echo -e "\n"
 
 # Test 7: Call contract (get USDC total supply)
 echo "Test 7: Call contract (USDC total supply)"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -105,7 +124,7 @@ echo -e "\n"
 
 # Test 8: Get transaction receipt (if you have a valid tx hash)
 echo "Test 8: Get transaction receipt"
-curl -s -X POST $BASE_URL/ \
+curl -s -X POST $ENDPOINT \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -122,8 +141,9 @@ curl -s $BASE_URL/metrics | head -20
 
 echo -e "\n"
 
-# Test 10: Stats endpoint
-echo "Test 10: Proxy stats"
-curl -s $BASE_URL/stats | jq '.'
+# Test 10: Health check
+echo "Test 10: Health check"
+curl -s $BASE_URL/health | jq '.'
 
 echo -e "\nTesting complete!"
+echo "Network tested: ${NETWORK}"
