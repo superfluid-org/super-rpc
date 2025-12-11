@@ -21,7 +21,6 @@ export const CACHEABLE_METHODS = {
     'net_version',
     'eth_getTransactionReceipt',
     'eth_getTransactionByHash',
-    'eth_getBlockReceipts',
   ],
   HISTORICAL_CACHEABLE: [
     'eth_call', // Historical calls cached forever
