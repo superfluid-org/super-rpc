@@ -2,6 +2,8 @@
  * Application Constants
  */
 
+// TODO: pass cacheable methods from config
+
 export const DEFAULT_VALUES = {
   PORT: 3000,
   HOST: '0.0.0.0',
@@ -17,17 +19,20 @@ export const DEFAULT_VALUES = {
 
 export const CACHEABLE_METHODS = {
   INFINITELY_CACHEABLE: [
+    // Irrespective of max_age settings
     'eth_chainId',
     'net_version',
     'eth_getTransactionReceipt',
     'eth_getTransactionByHash',
+
   ],
   HISTORICAL_CACHEABLE: [
-    'eth_call', // Historical calls cached forever
-    'eth_getBlockByNumber', // Historical blocks cached forever
-    'eth_getLogs', // Historical logs cached forever
-    'eth_getStorageAt', // Historical storage cached forever
-    'eth_getBalance', // Historical balance cached forever
+    // Affeced by max_age settings
+    'eth_call',
+    'eth_getBlockByNumber',
+    'eth_getLogs',
+    'eth_getStorageAt',
+    'eth_getBalance',
   ],
   TIME_CACHEABLE: [
     'eth_blockNumber', // Latest block number (5 minutes)
