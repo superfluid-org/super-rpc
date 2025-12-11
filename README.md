@@ -1,4 +1,4 @@
-# Augmented RPC Proxy
+# superRPC
 
 A high-performance JSON-RPC proxy with intelligent caching and failover for EVM blockchain interactions.
 
@@ -14,7 +14,7 @@ cp config.sample.yaml config.yaml
 
 # Build and run
 npm run build
-npm start
+npm run start
 ```
 
 ## Configuration
@@ -46,7 +46,7 @@ rpc:
         url: "https://polygon-mainnet.g.alchemy.com/v2/demo"
 
 cache:
-  max_age: 300000  # 5 minutes
+  max_age: 300000  # 5 minutes (does not apply to cache-forever methods)
   enable_db: true
 
 rate_limit:
@@ -63,14 +63,6 @@ helmet:
   content_security_policy: true
 ```
 
-### Configuration File Locations
-
-The system looks for configuration files in this order:
-1. `./config.yaml` (project root)
-2. `./config.yml` (project root)
-3. `../config.yaml` (relative to dist)
-4. `../config.yml` (relative to dist)
-
 ### Environment Variables (Override YAML)
 
 Environment variables override YAML settings:
@@ -85,6 +77,18 @@ HELMET_ENABLED=false         # Disable security headers
 ```
 
 **Note**: Multi-network configuration is now handled through YAML only. Environment variable `RPC_NETWORKS` is deprecated.
+
+### Cache TTL Behavior
+
+The `cache.max_age` setting (default: 5 minutes) applies only to time-cacheable methods like `eth_blockNumber`. 
+
+**Cache-forever methods** (immutable blockchain data) are cached indefinitely and ignore the `max_age` setting:
+- **Infinitely cacheable**: `eth_chainId`, `net_version`, `eth_getTransactionReceipt`, `eth_getTransactionByHash`, `eth_getBlockReceipts`
+- **Historical data** (when using specific block numbers, not "latest"): `eth_call`, `eth_getBlockByNumber`, `eth_getLogs`, `eth_getStorageAt`, `eth_getBalance`
+
+For example, `eth_call` with a historical block number (e.g., `"0xF4240"`) is cached forever, while `eth_call` with `"latest"` uses a 30-second TTL.
+
+See [`src/config/constants.ts`](src/config/constants.ts) for the complete list of cacheable methods and their configurations.
 
 ### Failover Behavior
 
@@ -150,4 +154,7 @@ curl -X POST http://localhost:4500/ \
 ./test-augmented-rpc.sh
 ```
 
-Perfect for high-throughput workloads that need fast, reliable RPC access with intelligent caching and automatic failover.
+## 📈 Metrics
+
+- **Health**: `http://localhost:3000/health`
+- **Metrics**: `http://localhost:3000/metrics`
