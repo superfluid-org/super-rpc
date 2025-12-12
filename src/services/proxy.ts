@@ -419,28 +419,30 @@ export class RPCProxy {
 		return wrapped;
 	}
 
+	private getConfigMaxAge(): number {
+		return this.config.cache.maxAge === 0 
+			? Number.POSITIVE_INFINITY 
+			: this.config.cache.maxAge * 1000;
+	}
+
 	private resolveCachePolicy(request: JSONRPCRequest): { isCacheable: boolean; maxAgeMs: number } {
 		if (CACHEABLE_METHODS.INFINITELY_CACHEABLE.includes(request.method as any)) {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		if (CACHEABLE_METHODS.TIME_CACHEABLE.includes(request.method as any)) {
-			// If maxAge is 0, treat as infinite
-			const maxAgeMs = this.config.cache.maxAge === 0 
-				? Number.POSITIVE_INFINITY 
-				: this.config.cache.maxAge * 1000;
-			return { isCacheable: true, maxAgeMs };
+			return { isCacheable: true, maxAgeMs: this.getConfigMaxAge() };
 		}
 		if (CACHEABLE_METHODS.HISTORICAL_CACHEABLE.includes(request.method as any)) {
-			// Check if it's a historical call (not "latest")
 			const params = Array.isArray(request.params) ? request.params : [];
 			
 			// For eth_call, check the block parameter
 			if (request.method === 'eth_call') {
 				const blockParam = params[1];
-				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
-					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
-				}
-				return { isCacheable: true, maxAgeMs: 30000 }; // Latest = 30 seconds
+				const isHistorical = this.isHistoricalBlockTag(blockParam);
+				return { 
+					isCacheable: true, 
+					maxAgeMs: isHistorical ? Number.POSITIVE_INFINITY : this.getConfigMaxAge() 
+				};
 			}
 			
 			// For eth_getBlockByNumber, check if it's not "latest"
@@ -468,6 +470,33 @@ export class RPCProxy {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		return { isCacheable: false, maxAgeMs: 0 };
+	}
+
+	private isHistoricalBlockTag(blockTag: unknown): boolean {
+		if (!blockTag) return false;
+		
+		// Handle object block tags (e.g., {"blockNumber": "0xF4240"} or {"blockNumber": "latest"})
+		if (typeof blockTag === 'object' && blockTag !== null) {
+			const blockObj = blockTag as any;
+			// If object has blockHash, it's historical
+			if (blockObj.blockHash) return true;
+			
+			// Check blockNumber or number property
+			const blockNumber = blockObj.blockNumber || blockObj.number;
+			if (blockNumber && typeof blockNumber === 'string') {
+				// Historical if it's a hex block number (not "latest" or "pending")
+				return blockNumber !== 'latest' && blockNumber !== 'pending' && blockNumber.startsWith('0x');
+			}
+			return false;
+		}
+		
+		// Handle string block tags
+		if (typeof blockTag === 'string') {
+			// Historical if it's not "latest", "pending", or "earliest"
+			return blockTag !== 'latest' && blockTag !== 'pending' && blockTag !== 'earliest';
+		}
+		
+		return false;
 	}
 
 	private errorResponder = (err: Error, _req: Request, res: Response, _next: NextFunction): void => {
