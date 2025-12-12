@@ -231,6 +231,26 @@ export class CacheManager {
     }
 
     if (val !== undefined && val !== null) {
+      // Check if val is already a full JSONRPCResponse object
+      const isFullResponse = (
+        typeof val === 'object' &&
+        val !== null &&
+        !Array.isArray(val) &&
+        'jsonrpc' in val &&
+        (val as any).jsonrpc === '2.0' &&
+        ('result' in val || 'error' in val)
+      );
+      
+      if (isFullResponse) {
+        // Return the full response with updated id to match current request
+        const fullResponse = val as JSONRPCResponse;
+        return {
+          ...fullResponse,
+          id: requestId,
+        };
+      }
+      
+      // Legacy format: val is just the result, reconstruct the response
       return {
         jsonrpc: '2.0',
         id: requestId,
