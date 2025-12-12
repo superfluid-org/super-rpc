@@ -437,10 +437,44 @@ export class RPCProxy {
 			// For eth_call, check the block parameter
 			if (request.method === 'eth_call') {
 				const blockParam = params[1];
-				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
-					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				
+				// Handle object block tags (e.g., {"blockNumber": "0xF4240"} or {"blockNumber": "latest"})
+				if (blockParam && typeof blockParam === 'object' && blockParam !== null) {
+					const blockNumber = (blockParam as any).blockNumber || (blockParam as any).number;
+					if (blockNumber && typeof blockNumber === 'string') {
+						// If it's a specific block number (hex), cache forever
+						if (blockNumber !== 'latest' && blockNumber !== 'pending' && blockNumber.startsWith('0x')) {
+							return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+						}
+						// If it's "latest" or "pending", use config max_age
+						const maxAgeMs = this.config.cache.maxAge === 0 
+							? Number.POSITIVE_INFINITY 
+							: this.config.cache.maxAge * 1000;
+						return { isCacheable: true, maxAgeMs };
+					}
+					// If object has blockHash, treat as historical (forever)
+					if ((blockParam as any).blockHash) {
+						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+					}
 				}
-				return { isCacheable: true, maxAgeMs: 30000 }; // Latest = 30 seconds
+				
+				// Handle string block tags
+				if (blockParam && typeof blockParam === 'string') {
+					if (blockParam !== 'latest' && blockParam !== 'pending' && blockParam !== 'earliest') {
+						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+					}
+					// For "latest", "pending", "earliest" - use config max_age
+					const maxAgeMs = this.config.cache.maxAge === 0 
+						? Number.POSITIVE_INFINITY 
+						: this.config.cache.maxAge * 1000;
+					return { isCacheable: true, maxAgeMs };
+				}
+				
+				// Default: use config max_age
+				const maxAgeMs = this.config.cache.maxAge === 0 
+					? Number.POSITIVE_INFINITY 
+					: this.config.cache.maxAge * 1000;
+				return { isCacheable: true, maxAgeMs };
 			}
 			
 			// For eth_getBlockByNumber, check if it's not "latest"
