@@ -419,62 +419,30 @@ export class RPCProxy {
 		return wrapped;
 	}
 
+	private getConfigMaxAge(): number {
+		return this.config.cache.maxAge === 0 
+			? Number.POSITIVE_INFINITY 
+			: this.config.cache.maxAge * 1000;
+	}
+
 	private resolveCachePolicy(request: JSONRPCRequest): { isCacheable: boolean; maxAgeMs: number } {
 		if (CACHEABLE_METHODS.INFINITELY_CACHEABLE.includes(request.method as any)) {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		if (CACHEABLE_METHODS.TIME_CACHEABLE.includes(request.method as any)) {
-			// If maxAge is 0, treat as infinite
-			const maxAgeMs = this.config.cache.maxAge === 0 
-				? Number.POSITIVE_INFINITY 
-				: this.config.cache.maxAge * 1000;
-			return { isCacheable: true, maxAgeMs };
+			return { isCacheable: true, maxAgeMs: this.getConfigMaxAge() };
 		}
 		if (CACHEABLE_METHODS.HISTORICAL_CACHEABLE.includes(request.method as any)) {
-			// Check if it's a historical call (not "latest")
 			const params = Array.isArray(request.params) ? request.params : [];
 			
 			// For eth_call, check the block parameter
 			if (request.method === 'eth_call') {
 				const blockParam = params[1];
-				
-				// Handle object block tags (e.g., {"blockNumber": "0xF4240"} or {"blockNumber": "latest"})
-				if (blockParam && typeof blockParam === 'object' && blockParam !== null) {
-					const blockNumber = (blockParam as any).blockNumber || (blockParam as any).number;
-					if (blockNumber && typeof blockNumber === 'string') {
-						// If it's a specific block number (hex), cache forever
-						if (blockNumber !== 'latest' && blockNumber !== 'pending' && blockNumber.startsWith('0x')) {
-							return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
-						}
-						// If it's "latest" or "pending", use config max_age
-						const maxAgeMs = this.config.cache.maxAge === 0 
-							? Number.POSITIVE_INFINITY 
-							: this.config.cache.maxAge * 1000;
-						return { isCacheable: true, maxAgeMs };
-					}
-					// If object has blockHash, treat as historical (forever)
-					if ((blockParam as any).blockHash) {
-						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
-					}
-				}
-				
-				// Handle string block tags
-				if (blockParam && typeof blockParam === 'string') {
-					if (blockParam !== 'latest' && blockParam !== 'pending' && blockParam !== 'earliest') {
-						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
-					}
-					// For "latest", "pending", "earliest" - use config max_age
-					const maxAgeMs = this.config.cache.maxAge === 0 
-						? Number.POSITIVE_INFINITY 
-						: this.config.cache.maxAge * 1000;
-					return { isCacheable: true, maxAgeMs };
-				}
-				
-				// Default: use config max_age
-				const maxAgeMs = this.config.cache.maxAge === 0 
-					? Number.POSITIVE_INFINITY 
-					: this.config.cache.maxAge * 1000;
-				return { isCacheable: true, maxAgeMs };
+				const isHistorical = this.isHistoricalBlockTag(blockParam);
+				return { 
+					isCacheable: true, 
+					maxAgeMs: isHistorical ? Number.POSITIVE_INFINITY : this.getConfigMaxAge() 
+				};
 			}
 			
 			// For eth_getBlockByNumber, check if it's not "latest"
@@ -502,6 +470,33 @@ export class RPCProxy {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		return { isCacheable: false, maxAgeMs: 0 };
+	}
+
+	private isHistoricalBlockTag(blockTag: unknown): boolean {
+		if (!blockTag) return false;
+		
+		// Handle object block tags (e.g., {"blockNumber": "0xF4240"} or {"blockNumber": "latest"})
+		if (typeof blockTag === 'object' && blockTag !== null) {
+			const blockObj = blockTag as any;
+			// If object has blockHash, it's historical
+			if (blockObj.blockHash) return true;
+			
+			// Check blockNumber or number property
+			const blockNumber = blockObj.blockNumber || blockObj.number;
+			if (blockNumber && typeof blockNumber === 'string') {
+				// Historical if it's a hex block number (not "latest" or "pending")
+				return blockNumber !== 'latest' && blockNumber !== 'pending' && blockNumber.startsWith('0x');
+			}
+			return false;
+		}
+		
+		// Handle string block tags
+		if (typeof blockTag === 'string') {
+			// Historical if it's not "latest", "pending", or "earliest"
+			return blockTag !== 'latest' && blockTag !== 'pending' && blockTag !== 'earliest';
+		}
+		
+		return false;
 	}
 
 	private errorResponder = (err: Error, _req: Request, res: Response, _next: NextFunction): void => {
