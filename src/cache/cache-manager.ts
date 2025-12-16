@@ -72,23 +72,40 @@ export class CacheManager {
   getCacheKey(request: JSONRPCRequest): string {
     const method = request.method;
     const params = request.params || [];
+    const paramCount = params.length;
     
-    // Fast path for common methods with no params
-    if (params.length === 0) {
-      return method;
+    // Fast path: no params
+    if (paramCount === 0) return method;
+    
+    // Fast path: single param
+    if (paramCount === 1) {
+      const param = params[0];
+      const paramType = typeof param;
+      
+      // Optimized method-specific handling
+      switch (method) {
+        case 'eth_getLogs': {
+          if (paramType === 'object' && param !== null) {
+            const filter = param as any;
+            return `${method}:${filter.address || ''}:${filter.fromBlock || '0x0'}:${filter.toBlock || 'latest'}:${filter.topics ? JSON.stringify(filter.topics) : '[]'}`;
+          }
+          break;
+        }
+        case 'eth_getBlockReceipts':
+          return `${method}:${param}`;
+        default:
+          // Primitive single param
+          if (paramType !== 'object' || param === null) {
+            return `${method}:${param}`;
+          }
+      }
     }
     
-    // Fast path for single param methods
-    if (params.length === 1) {
-      return `${method}:${params[0]}`;
-    }
-    
-    // Fast path for eth_call with specific patterns
-    if (method === 'eth_call' && params.length === 2) {
+    // Fast path: two params (eth_call)
+    if (paramCount === 2 && method === 'eth_call') {
       const callObject = params[0] as any;
       const blockTag = params[1];
-      if (callObject && typeof callObject === 'object' && callObject.to && callObject.data) {
-        // Handle blockTag - stringify objects/arrays, otherwise use as string
+      if (callObject?.to && callObject?.data) {
         const blockTagStr = (blockTag !== null && blockTag !== undefined && typeof blockTag === 'object')
           ? JSON.stringify(blockTag)
           : String(blockTag);
@@ -96,27 +113,8 @@ export class CacheManager {
       }
     }
     
-    // Fast path for eth_getLogs
-    if (method === 'eth_getLogs' && params.length === 1) {
-      const filter = params[0] as any;
-      if (filter && typeof filter === 'object') {
-        const address = filter.address || '';
-        const fromBlock = filter.fromBlock || '0x0';
-        const toBlock = filter.toBlock || 'latest';
-        const topics = filter.topics ? JSON.stringify(filter.topics) : '[]';
-        return `${method}:${address}:${fromBlock}:${toBlock}:${topics}`;
-      }
-    }
-    
-    // Fast path for eth_getBlockReceipts
-    if (method === 'eth_getBlockReceipts' && params.length === 1) {
-      const blockParam = params[0];
-      return `${method}:${blockParam}`;
-    }
-    
-    // Fallback to hash for complex cases
-    const content = `${method}:${JSON.stringify(params, null, 0)}`;
-    return createHash('sha256').update(content).digest('hex').substring(0, 16);
+    // Fallback: hash for complex cases
+    return createHash('sha256').update(`${method}:${JSON.stringify(params, null, 0)}`).digest('hex').substring(0, 16);
   }
 
   async handleDuplicateRequest(cacheKey: string): Promise<void> {

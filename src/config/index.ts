@@ -143,6 +143,99 @@ export class ConfigManager {
     if (!this.config.rpc.url && Object.keys(this.config.rpc.networks).length === 0) {
       console.warn('Warning: No RPC URL configured. Set RPC_URL environment variable or configure networks in config.yaml');
     }
+    
+    // Step 2: Validate upstream reliability - warn if archival nodes not detected
+    this.validateArchivalNodes();
+  }
+
+  /**
+   * Validate that upstream RPC nodes are archival nodes for historical data queries
+   */
+  private validateArchivalNodes(): void {
+    const networks = this.config.rpc.networks || {};
+    const warnings: string[] = [];
+
+    // Check single RPC_URL
+    if (this.config.rpc.url) {
+      if (!this.isLikelyArchivalNode(this.config.rpc.url)) {
+        warnings.push(`RPC_URL (${this.maskUrl(this.config.rpc.url)}) may not be an archival node. Historical queries may fail or return incomplete data.`);
+      }
+    }
+
+    // Check network configurations
+    for (const [networkKey, networkConfig] of Object.entries(networks)) {
+      if (typeof networkConfig === 'object' && networkConfig !== null) {
+        // Check primary
+        if (networkConfig.primary?.url) {
+          if (!this.isLikelyArchivalNode(networkConfig.primary.url)) {
+            warnings.push(`Network "${networkKey}" primary RPC (${this.maskUrl(networkConfig.primary.url)}) may not be an archival node. Historical queries may fail or return incomplete data.`);
+          }
+        }
+        
+        // Check fallback
+        if (networkConfig.fallback?.url) {
+          if (!this.isLikelyArchivalNode(networkConfig.fallback.url)) {
+            warnings.push(`Network "${networkKey}" fallback RPC (${this.maskUrl(networkConfig.fallback.url)}) may not be an archival node. Historical queries may fail or return incomplete data.`);
+          }
+        }
+        
+        // Check old format (url) - support legacy config format
+        const legacyConfig = networkConfig as any;
+        if (legacyConfig.url && !networkConfig.primary) {
+          if (!this.isLikelyArchivalNode(legacyConfig.url)) {
+            warnings.push(`Network "${networkKey}" RPC (${this.maskUrl(legacyConfig.url)}) may not be an archival node. Historical queries may fail or return incomplete data.`);
+          }
+        }
+      }
+    }
+
+    // Emit warnings
+    if (warnings.length > 0) {
+      console.warn('\n⚠️  ARCHIVAL NODE WARNING:');
+      console.warn('For reliable historical data queries (eth_getLogs, eth_getBlockReceipts, etc.),');
+      console.warn('ensure your upstream RPC nodes are full archival nodes.\n');
+      warnings.forEach(warning => console.warn(`  - ${warning}`));
+      console.warn('\nTo suppress this warning, add "archival: true" to your network config or use');
+      console.warn('RPC providers that explicitly support archival data (e.g., Alchemy Archive, Infura Archive).\n');
+    }
+  }
+
+  /**
+   * Check if URL is likely an archival node based on common patterns
+   */
+  private isLikelyArchivalNode(url: string): boolean {
+    if (!url) return false;
+    
+    const lowerUrl = url.toLowerCase();
+    
+    // Check for explicit archival indicators
+    const archivalIndicators = [
+      'archive',
+      'archival',
+      'full',
+      'complete',
+    ];
+    
+    if (archivalIndicators.some(indicator => lowerUrl.includes(indicator))) {
+      return true;
+    }
+    
+    // These providers often have archival, but URL alone doesn't guarantee it
+    // We'll be conservative and not assume archival unless explicitly indicated
+    return false;
+  }
+
+  /**
+   * Mask URL for logging (hide sensitive parts)
+   */
+  private maskUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      // Mask path and query but keep host
+      return `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.substring(0, 20)}...`;
+    } catch {
+      return url.substring(0, 50) + '...';
+    }
   }
 
   getConfig(): ProxyConfig {

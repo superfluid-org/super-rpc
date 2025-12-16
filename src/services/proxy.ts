@@ -15,6 +15,7 @@ import { ConnectionPoolManager } from '@/utils/connection-pool';
 import { RequestQueueManager } from '@/utils/request-queue';
 import { SimpleRequestOptimizer } from '@/utils/request-optimizer';
 import { AdvancedMetrics } from '@/telemetry/advanced-metrics';
+import { ResponseValidator } from '@/utils/response-validator';
 
 export class RPCProxy {
 	private readonly app = express();
@@ -34,6 +35,15 @@ export class RPCProxy {
 	// Request optimization components
 	private readonly requestOptimizer: SimpleRequestOptimizer;
 	private readonly advancedMetrics: AdvancedMetrics;
+	
+	// Response validation
+	private readonly responseValidator: ResponseValidator;
+	
+	// Pre-computed cache policy lookups for performance
+	private readonly configMaxAge: number;
+	private readonly infinitelyCacheableSet: Set<string>;
+	private readonly timeCacheableSet: Set<string>;
+	private readonly historicalCacheableSet: Set<string>;
 	
 	private stats: ProxyStats = {
 		httpRequestsProcessed: 0,
@@ -60,8 +70,19 @@ export class RPCProxy {
 		// Initialize request optimization components
 		this.requestOptimizer = new SimpleRequestOptimizer();
 		this.advancedMetrics = AdvancedMetrics.getInstance();
+		
+		// Initialize response validator
+		this.responseValidator = new ResponseValidator(this.logger);
 
 		this.httpClient = new HTTPClient(this.config, this.logger, this.connectionPool);
+
+		// Pre-compute cache policy lookups for performance (O(1) Set lookups instead of O(n) array.includes)
+		this.configMaxAge = this.config.cache.maxAge === 0 
+			? Number.POSITIVE_INFINITY 
+			: this.config.cache.maxAge * 1000;
+		this.infinitelyCacheableSet = new Set(CACHEABLE_METHODS.INFINITELY_CACHEABLE);
+		this.timeCacheableSet = new Set(CACHEABLE_METHODS.TIME_CACHEABLE);
+		this.historicalCacheableSet = new Set(CACHEABLE_METHODS.HISTORICAL_CACHEABLE);
 
 		// Load network map from config
 		this.loadNetworkMap();
@@ -118,20 +139,8 @@ export class RPCProxy {
 	}
 
 	private generateInflightKey(keyPrefix: string, request: JSONRPCRequest): string {
-		const method = request.method;
-		const params = request.params || [];
-		
-		// Fast path for common methods
-		if (params.length === 0) {
-			return `${keyPrefix}${method}`;
-		}
-		
-		if (params.length === 1) {
-			return `${keyPrefix}${method}:${params[0]}`;
-		}
-		
-		// Fallback to JSON for complex cases
-		return `${keyPrefix}${method}:${JSON.stringify(params)}`;
+		// Reuse cache key generation logic for consistency and performance
+		return keyPrefix + this.cacheManager.getCacheKey(request);
 	}
 
 	async stop(): Promise<void> {
@@ -184,11 +193,6 @@ export class RPCProxy {
 		this.app.get('/cache/stats', async (_req: Request, res: Response) => {
 			const cacheStats = await this.cacheManager.getStats();
 			res.status(HTTP_STATUS.OK).json(cacheStats);
-		});
-
-		this.app.post('/cache/clear', async (_req: Request, res: Response) => {
-			await this.cacheManager.clearCache();
-			res.status(HTTP_STATUS.OK).json({ cleared: true });
 		});
 
 		// Multi-network JSON-RPC route
@@ -334,28 +338,40 @@ export class RPCProxy {
 			if (isCacheable) {
 				const cached = await this.cacheManager.getFromCache(cacheKey, maxAgeMs, request.id);
 				if (cached) {
-					const duration = Date.now() - startTs;
-					
-					// Batch stats updates for better performance
-					this.stats.httpCachedResponses++;
-					this.stats.cacheHits++;
-					this.stats.httpRequestsProcessed++;
-					
-					// Batch metrics updates
-					const methodLabel = request.method;
-					this.metrics.cachedResponsesTotal.labels(methodLabel).inc();
-					this.metrics.cacheHitsTotal.labels(methodLabel).inc();
-					this.metrics.requestsTotal.labels(methodLabel, 'HIT', 'success').inc();
-					this.metrics.requestDurationMs.labels(methodLabel, 'HIT').observe(duration);
-					this.logger.info('RPC served from cache', {
-						requestId: (req as any).requestId,
-						network: networkKey || 'default',
-						method: request.method,
-						id: request.id,
-						duration,
-						cacheStatus: 'HIT',
-					});
-					return cached;
+					// Step 3: Cache integrity check - only for eth_getLogs (most critical)
+					// Skip validation for other methods to improve performance
+					if (request.method === 'eth_getLogs' && !this.responseValidator.validateCachedResponse(request, cached)) {
+						this.logger.warn('Cached response failed integrity check, invalidating cache entry', {
+							method: request.method,
+							cacheKey,
+							requestId: request.id,
+						});
+						// Invalidate the cache entry and continue to fetch fresh data
+						await this.cacheManager.deleteFromCache(cacheKey);
+					} else {
+						const duration = Date.now() - startTs;
+						
+						// Batch stats updates for better performance
+						this.stats.httpCachedResponses++;
+						this.stats.cacheHits++;
+						this.stats.httpRequestsProcessed++;
+						
+						// Batch metrics updates
+						const methodLabel = request.method;
+						this.metrics.cachedResponsesTotal.labels(methodLabel).inc();
+						this.metrics.cacheHitsTotal.labels(methodLabel).inc();
+						this.metrics.requestsTotal.labels(methodLabel, 'HIT', 'success').inc();
+						this.metrics.requestDurationMs.labels(methodLabel, 'HIT').observe(duration);
+						this.logger.info('RPC served from cache', {
+							requestId: (req as any).requestId,
+							network: networkKey || 'default',
+							method: request.method,
+							id: request.id,
+							duration,
+							cacheStatus: 'HIT',
+						});
+						return cached;
+					}
 				}
 			}
 
@@ -375,8 +391,12 @@ export class RPCProxy {
 					const upstreamResponse = await this.httpClient.makeRequest(request, undefined, undefined, undefined, networkKey);
 					const duration = Date.now() - startTs;
 					
-					// Record response size metrics
-					const responseSize = JSON.stringify(upstreamResponse.data).length;
+					// Record response size metrics (lazy calculation - only if metrics enabled)
+					// Use approximate size calculation to avoid expensive JSON.stringify
+					const responseData: any = upstreamResponse.data;
+					const responseSize = responseData ? 
+						(typeof responseData === 'string' ? responseData.length : 
+						 JSON.stringify(responseData).length) : 0;
 					this.metrics.responseSizeBytes.labels(request.method).observe(responseSize);
 					
 					this.stats.httpUpstreamResponses++;
@@ -398,9 +418,24 @@ export class RPCProxy {
 
 
 					const rpcData = upstreamResponse.data as JSONRPCResponse;
+					// Step 1: Validate response completeness before caching
 					// Only cache successful responses with actual results (not null, undefined, or errors)
 					if (isCacheable && rpcData && rpcData.result !== undefined && rpcData.result !== null && !rpcData.error) {
-						await this.cacheManager.writeToCache(cacheKey, rpcData);
+						// Validate response matches request exactly (addresses, topics, block ranges, etc.)
+						if (this.responseValidator.validateResponseForCache(request, rpcData)) {
+							await this.cacheManager.writeToCache(cacheKey, rpcData);
+							this.logger.debug('Response validated and cached', {
+								method: request.method,
+								cacheKey,
+								requestId: request.id,
+							});
+						} else {
+							this.logger.warn('Response failed validation, not caching', {
+								method: request.method,
+								cacheKey,
+								requestId: request.id,
+							});
+						}
 					}
 
 					return rpcData;
@@ -419,75 +454,72 @@ export class RPCProxy {
 		return wrapped;
 	}
 
-	private getConfigMaxAge(): number {
-		return this.config.cache.maxAge === 0 
-			? Number.POSITIVE_INFINITY 
-			: this.config.cache.maxAge * 1000;
-	}
-
 	private resolveCachePolicy(request: JSONRPCRequest): { isCacheable: boolean; maxAgeMs: number } {
-		if (CACHEABLE_METHODS.INFINITELY_CACHEABLE.includes(request.method as any)) {
+		const method = request.method;
+		
+		// Fast path: infinitely cacheable (Set lookup is O(1))
+		if (this.infinitelyCacheableSet.has(method)) {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
-		if (CACHEABLE_METHODS.TIME_CACHEABLE.includes(request.method as any)) {
-			return { isCacheable: true, maxAgeMs: this.getConfigMaxAge() };
+		
+		// Fast path: time cacheable
+		if (this.timeCacheableSet.has(method)) {
+			return { isCacheable: true, maxAgeMs: this.configMaxAge };
 		}
-		if (CACHEABLE_METHODS.HISTORICAL_CACHEABLE.includes(request.method as any)) {
+		
+		// Historical cacheable methods
+		if (this.historicalCacheableSet.has(method)) {
 			const params = Array.isArray(request.params) ? request.params : [];
 			
-			// For eth_call, check the block parameter
-			if (request.method === 'eth_call') {
-				const blockParam = params[1];
-				const isHistorical = this.isHistoricalBlockTag(blockParam);
-				return { 
-					isCacheable: true, 
-					maxAgeMs: isHistorical ? Number.POSITIVE_INFINITY : this.getConfigMaxAge() 
-				};
-			}
-			
-			// For eth_getBlockByNumber, check if it's not "latest"
-			if (request.method === 'eth_getBlockByNumber') {
-				const blockParam = params[0];
-				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
-					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+			// Optimized method-specific handling
+			switch (method) {
+				case 'eth_call': {
+					const blockParam = params[1];
+					const isHistorical = this.isHistoricalBlockTag(blockParam);
+					return { 
+						isCacheable: true, 
+						maxAgeMs: isHistorical ? Number.POSITIVE_INFINITY : this.configMaxAge 
+					};
 				}
-				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
-			}
-			
-			// For eth_getLogs - check the filter object for historical blocks
-			if (request.method === 'eth_getLogs') {
-				const filter = params[0] as any;
-				if (filter && typeof filter === 'object') {
-					// Check fromBlock and toBlock - if either is a specific block number (not "latest"), it's historical
-					const fromBlock = filter.fromBlock;
-					const toBlock = filter.toBlock;
-					const isHistorical = (
-						(fromBlock && typeof fromBlock === 'string' && fromBlock !== 'latest' && fromBlock !== 'pending' && fromBlock.startsWith('0x')) ||
-						(toBlock && typeof toBlock === 'string' && toBlock !== 'latest' && toBlock !== 'pending' && toBlock.startsWith('0x'))
-					);
-					if (isHistorical) {
-						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				case 'eth_getBlockByNumber': {
+					const blockParam = params[0];
+					if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
+						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 					}
-					return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
+					return { isCacheable: false, maxAgeMs: 0 };
 				}
-				return { isCacheable: false, maxAgeMs: 0 };
-			}
-			
-			// For eth_getStorageAt, eth_getBalance - check for specific blocks
-			if (['eth_getStorageAt', 'eth_getBalance'].includes(request.method)) {
-				// Check if any parameter contains a specific block number (not "latest")
-				const hasSpecificBlock = params.some(param => 
-					typeof param === 'string' && param.startsWith('0x') && param !== 'latest'
-				);
-				if (hasSpecificBlock) {
-					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
+				case 'eth_getLogs': {
+					const filter = params[0] as any;
+					if (filter && typeof filter === 'object') {
+						const fromBlock = filter.fromBlock;
+						const toBlock = filter.toBlock;
+						// Optimized historical check
+						const isHistorical = (
+							(fromBlock && typeof fromBlock === 'string' && fromBlock !== 'latest' && fromBlock !== 'pending' && fromBlock.startsWith('0x')) ||
+							(toBlock && typeof toBlock === 'string' && toBlock !== 'latest' && toBlock !== 'pending' && toBlock.startsWith('0x'))
+						);
+						return { 
+							isCacheable: true, 
+							maxAgeMs: isHistorical ? Number.POSITIVE_INFINITY : 0 
+						};
+					}
+					return { isCacheable: false, maxAgeMs: 0 };
 				}
-				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
+				case 'eth_getStorageAt':
+				case 'eth_getBalance': {
+					// Check for specific block number in params
+					for (const param of params) {
+						if (typeof param === 'string' && param.startsWith('0x') && param !== 'latest') {
+							return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
+						}
+					}
+					return { isCacheable: false, maxAgeMs: 0 };
+				}
+				default:
+					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 			}
-			
-			// Default for other historical methods
-			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
+		
 		return { isCacheable: false, maxAgeMs: 0 };
 	}
 

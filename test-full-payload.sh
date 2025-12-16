@@ -151,11 +151,8 @@ echo -e "${YELLOW}Test 1: eth_getBlockReceipts${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo ""
 
-# Clear cache first to ensure clean test
-echo "Clearing cache..."
-CLEAR_RESPONSE=$(curl -s -X POST $BASE_URL/cache/clear)
-echo "Cache clear response: $CLEAR_RESPONSE"
-sleep 1
+# Note: Cache clear endpoint has been removed for security/stability
+# If you need to clear cache, restart the server or wait for entries to expire
 echo ""
 
 REQUEST_BODY='{
