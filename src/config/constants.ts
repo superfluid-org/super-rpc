@@ -24,7 +24,7 @@ export const CACHEABLE_METHODS = {
     'net_version',
     'eth_getTransactionReceipt',
     'eth_getTransactionByHash',
-
+    'eth_getBlockReceipts',
   ],
   HISTORICAL_CACHEABLE: [
     // Affeced by max_age settings
