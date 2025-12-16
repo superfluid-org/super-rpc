@@ -31,13 +31,23 @@ export class HTTPClient {
     if (networkKey && this.config.rpc.networks[networkKey]) {
       const networkConfig = this.config.rpc.networks[networkKey];
       
-      // Try primary first (no retries - failover immediately on failure)
+      // Try primary first with configurable timeout before switching to fallback
       try {
-        const primaryResponse = await this.tryUpstream(
+        const primaryTimeoutMs = this.config.rpc.primaryTimeoutMs || 3000;
+        const primaryPromise = this.tryUpstream(
           requestBody,
           networkConfig.primary.url,
           networkKey
         );
+        
+        // Race primary request against configured timeout
+        const timeoutPromise = new Promise<AxiosResponse<JSONRPCResponse>>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Primary upstream timeout (${primaryTimeoutMs}ms)`));
+          }, primaryTimeoutMs);
+        });
+        
+        const primaryResponse = await Promise.race([primaryPromise, timeoutPromise]);
         
         // Check if primary returned valid data
         const hasValidResult = this.hasValidResult(primaryResponse.data, requestBody.method);
@@ -94,9 +104,11 @@ export class HTTPClient {
         return primaryResponse;
         
       } catch (primaryError) {
-        // Primary failed - immediately try fallback (no retries on primary)
+        // Primary failed or timed out - immediately try fallback (no retries on primary)
+        const isTimeout = (primaryError as Error).message?.includes('timeout');
         if (networkConfig.fallback) {
-          this.logger.debug('Primary failed, trying fallback immediately', {
+          const primaryTimeoutMs = this.config.rpc.primaryTimeoutMs || 3000;
+          this.logger.debug(isTimeout ? `Primary exceeded ${primaryTimeoutMs}ms timeout, switching to fallback` : 'Primary failed, trying fallback immediately', {
             method: requestBody.method,
             requestId: requestBody.id,
             networkKey,

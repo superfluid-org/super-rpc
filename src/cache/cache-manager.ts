@@ -91,8 +91,28 @@ export class CacheManager {
           }
           break;
         }
-        case 'eth_getBlockReceipts':
-          return `${method}:${param}`;
+        case 'eth_getBlockReceipts': {
+          // Handle string block numbers/tags
+          if (paramType === 'string') {
+            return `${method}:${param}`;
+          }
+          // Handle block structure objects (e.g., {"blockNumber": "0x123"} or {"blockHash": "0x..."})
+          if (paramType === 'object' && param !== null) {
+            const blockObj = param as any;
+            // Prefer blockHash if present (most specific)
+            if (blockObj.blockHash) {
+              return `${method}:${blockObj.blockHash}`;
+            }
+            // Use blockNumber if present
+            if (blockObj.blockNumber || blockObj.number) {
+              return `${method}:${blockObj.blockNumber || blockObj.number}`;
+            }
+            // Fallback: stringify the object
+            return `${method}:${JSON.stringify(param)}`;
+          }
+          // Fallback for other types
+          return `${method}:${String(param)}`;
+        }
         default:
           // Primitive single param
           if (paramType !== 'object' || param === null) {

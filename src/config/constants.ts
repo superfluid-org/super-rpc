@@ -10,6 +10,7 @@ export const DEFAULT_VALUES = {
   RPC_TIMEOUT: 30000,
   RPC_RETRIES: 10,
   RPC_INITIAL_TIMEOUT: 2000,
+  RPC_PRIMARY_TIMEOUT: 3000, // Timeout before switching from primary to fallback
   CACHE_MAX_AGE: 10,
   CACHE_MAX_SIZE: 10000,
   RATE_LIMIT_WINDOW: 900000, // 15 minutes

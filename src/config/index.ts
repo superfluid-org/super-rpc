@@ -43,6 +43,10 @@ export class ConfigManager {
           process.env.RPC_INITIAL_TIMEOUT || yamlConfig.rpc?.initial_timeout_ms || String(DEFAULT_VALUES.RPC_INITIAL_TIMEOUT),
           10
         ),
+        primaryTimeoutMs: parseInt(
+          process.env.PRIMARY_TIMEOUT_MS || yamlConfig.rpc?.primary_timeout_ms || String(DEFAULT_VALUES.RPC_PRIMARY_TIMEOUT),
+          10
+        ),
         networks: this.loadNetworks(yamlConfig.rpc?.networks),
         batchConcurrencyLimit: parseInt(process.env.BATCH_CONCURRENCY_LIMIT || yamlConfig.rpc?.batch_concurrency_limit || '10', 10),
         batchTimeout: parseInt(process.env.BATCH_TIMEOUT || yamlConfig.rpc?.batch_timeout || '5000', 10),

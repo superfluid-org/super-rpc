@@ -42,6 +42,7 @@ export interface RPCConfig {
   timeout: number;
   retries: number;
   initialTimeoutMs: number;
+  primaryTimeoutMs?: number; // Timeout before switching from primary to fallback (default: 3000ms)
   networks: Record<string, NetworkConfig>;
   batchConcurrencyLimit: number;
   batchTimeout: number;

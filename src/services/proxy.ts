@@ -421,21 +421,13 @@ export class RPCProxy {
 					// Step 1: Validate response completeness before caching
 					// Only cache successful responses with actual results (not null, undefined, or errors)
 					if (isCacheable && rpcData && rpcData.result !== undefined && rpcData.result !== null && !rpcData.error) {
-						// Validate response matches request exactly (addresses, topics, block ranges, etc.)
-						if (this.responseValidator.validateResponseForCache(request, rpcData)) {
-							await this.cacheManager.writeToCache(cacheKey, rpcData);
-							this.logger.debug('Response validated and cached', {
-								method: request.method,
-								cacheKey,
-								requestId: request.id,
-							});
-						} else {
-							this.logger.warn('Response failed validation, not caching', {
-								method: request.method,
-								cacheKey,
-								requestId: request.id,
-							});
+						// Fast validation - only for eth_getLogs, skip for others to improve performance
+						if (request.method === 'eth_getLogs' && !this.responseValidator.validateResponseForCache(request, rpcData)) {
+							// Skip caching invalid eth_getLogs responses
+							return rpcData;
 						}
+						// Cache the response
+						await this.cacheManager.writeToCache(cacheKey, rpcData);
 					}
 
 					return rpcData;
