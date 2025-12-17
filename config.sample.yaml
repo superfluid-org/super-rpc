@@ -74,6 +74,7 @@ rpc:
   timeout: 30000
   retries: 3
   initial_timeout_ms: 5000
+  primary_timeout_ms: 3000  # Timeout before switching from primary to fallback (milliseconds)
   batch_concurrency_limit: 10
   batch_timeout: 5000
 

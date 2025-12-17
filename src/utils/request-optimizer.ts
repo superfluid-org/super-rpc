@@ -7,16 +7,16 @@ export interface RequestOptimizer {
 }
 
 export class SimpleRequestOptimizer implements RequestOptimizer {
+  private readonly cacheableMethodsSet = new Set([
+    'eth_blockNumber',
+    'eth_chainId', 
+    'net_version',
+    'eth_getTransactionReceipt',
+    'eth_getTransactionByHash'
+  ]);
+
   shouldCache(request: JSONRPCRequest): boolean {
-    const cacheableMethods = [
-      'eth_blockNumber',
-      'eth_chainId', 
-      'net_version',
-      'eth_getTransactionReceipt',
-      'eth_getTransactionByHash'
-    ];
-    
-    return cacheableMethods.includes(request.method);
+    return this.cacheableMethodsSet.has(request.method);
   }
 
   getCacheKey(request: JSONRPCRequest): string {
