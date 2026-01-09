@@ -73,39 +73,84 @@ export class CacheManager {
       return method;
     }
     
-    // Fast path for single param methods
-    if (params.length === 1) {
-      return `${method}:${params[0]}`;
-    }
+    // Method-specific cache key generation (MUST come before generic single-param check)
     
-    // Fast path for eth_call with specific patterns
-    if (method === 'eth_call' && params.length === 2) {
-      const callObject = params[0] as any;
-      const blockTag = params[1];
-      if (callObject && typeof callObject === 'object' && callObject.to && callObject.data) {
-        return `${method}:${callObject.to}:${callObject.data}:${blockTag}`;
-      }
-    }
-    
-    // Fast path for eth_getLogs
+    // eth_getLogs: filter object with address, block range, topics
     if (method === 'eth_getLogs' && params.length === 1) {
       const filter = params[0] as any;
       if (filter && typeof filter === 'object') {
-        const address = filter.address || '';
-        const fromBlock = filter.fromBlock || '0x0';
-        const toBlock = filter.toBlock || 'latest';
-        const topics = filter.topics ? JSON.stringify(filter.topics) : '[]';
+        // Normalize address to lowercase - can be string or array of strings
+        let address = '';
+        if (filter.address) {
+          address = Array.isArray(filter.address) 
+            ? filter.address.map((a: string) => a.toLowerCase()).sort().join(',') 
+            : filter.address.toLowerCase();
+        }
+        const fromBlock = (filter.fromBlock || '0x0').toLowerCase();
+        const toBlock = (filter.toBlock || 'latest').toLowerCase();
+        // Normalize topics to lowercase (addresses in topics)
+        const topics = filter.topics 
+          ? JSON.stringify(filter.topics.map((t: any) => 
+              t === null ? null : Array.isArray(t) 
+                ? t.map((x: string | null) => x?.toLowerCase()) 
+                : t.toLowerCase()
+            ))
+          : '[]';
         return `${method}:${address}:${fromBlock}:${toBlock}:${topics}`;
       }
     }
     
-    // Fast path for eth_getBlockReceipts
-    if (method === 'eth_getBlockReceipts' && params.length === 1) {
-      const blockParam = params[0];
-      return `${method}:${blockParam}`;
+    // eth_call: call object + block tag
+    if (method === 'eth_call' && params.length >= 1) {
+      const callObject = params[0] as any;
+      const blockTag = (params[1] || 'latest').toString().toLowerCase();
+      if (callObject && typeof callObject === 'object') {
+        const to = (callObject.to || '').toLowerCase();
+        const data = (callObject.data || '0x').toLowerCase();
+        const from = (callObject.from || '').toLowerCase();
+        return `${method}:${to}:${data}:${from}:${blockTag}`;
+      }
     }
     
-    // Fallback to hash for complex cases
+    // eth_getBlockReceipts: block number/hash
+    if (method === 'eth_getBlockReceipts' && params.length === 1) {
+      const blockParam = params[0];
+      if (typeof blockParam === 'string') {
+        return `${method}:${blockParam.toLowerCase()}`;
+      }
+    }
+    
+    // eth_getBlockByNumber: block number + include txs flag
+    if (method === 'eth_getBlockByNumber' && params.length >= 1) {
+      const blockParam = params[0];
+      const includeTxs = params[1] || false;
+      if (typeof blockParam === 'string') {
+        return `${method}:${blockParam.toLowerCase()}:${includeTxs}`;
+      }
+    }
+    
+    // eth_getTransactionReceipt: tx hash (normalize to lowercase)
+    if (method === 'eth_getTransactionReceipt' && params.length === 1) {
+      const txHash = params[0];
+      if (typeof txHash === 'string') {
+        return `${method}:${txHash.toLowerCase()}`;
+      }
+    }
+    
+    // eth_getTransactionByHash: tx hash (normalize to lowercase)
+    if (method === 'eth_getTransactionByHash' && params.length === 1) {
+      const txHash = params[0];
+      if (typeof txHash === 'string') {
+        return `${method}:${txHash.toLowerCase()}`;
+      }
+    }
+    
+    // Fast path for simple single string/number param methods
+    if (params.length === 1 && (typeof params[0] === 'string' || typeof params[0] === 'number')) {
+      return `${method}:${params[0]}`;
+    }
+    
+    // Fallback to hash for complex cases (objects we didn't handle above)
     const content = `${method}:${JSON.stringify(params, null, 0)}`;
     return createHash('sha256').update(content).digest('hex').substring(0, 16);
   }
