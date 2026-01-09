@@ -288,25 +288,30 @@ export class HTTPClient {
     
     const result = responseData.result;
     
-    // null or undefined are invalid
-    if (result === null || result === undefined) return false;
+    // undefined is always invalid (malformed response)
+    if (result === undefined) return false;
     
-    // Empty string is invalid for most methods
+    // null is valid for some methods (e.g., eth_getTransactionReceipt for pending/unknown tx)
+    // but invalid for methods that should always return data
+    if (result === null) {
+      const nullValidMethods = ['eth_getTransactionReceipt', 'eth_getTransactionByHash'];
+      return nullValidMethods.includes(method);
+    }
+    
+    // Empty arrays are valid for methods that return lists
+    // - eth_getLogs: no events matched the filter (valid)
+    // - eth_getBlockReceipts: block has no transactions (valid)
+    if (Array.isArray(result)) {
+      return true; // Empty or non-empty arrays are valid
+    }
+    
+    // Empty string is generally invalid, but "0x" has special meaning
     if (result === '') return false;
     
-    // For eth_getLogs, empty array might be valid (no events), but we'll check separately
-    if (method === 'eth_getLogs' && Array.isArray(result)) {
-      return true; // Empty array is valid (means no logs)
-    }
-    
-    // For other methods, empty array is invalid
-    if (Array.isArray(result) && result.length === 0 && method !== 'eth_getLogs') {
-      return false;
-    }
-    
-    // For hex strings, "0x" alone is often invalid (except for some methods)
-    if (typeof result === 'string' && result === '0x' && !['eth_call', 'eth_getCode'].includes(method)) {
-      return false;
+    // "0x" is valid for eth_call (return value) and eth_getCode (no code = EOA)
+    if (typeof result === 'string' && result === '0x') {
+      const oxValidMethods = ['eth_call', 'eth_getCode', 'eth_getStorageAt'];
+      return oxValidMethods.includes(method);
     }
     
     return true;
@@ -314,7 +319,7 @@ export class HTTPClient {
 
   // Enhanced fallback logic for critical RPC methods
   private shouldTryFallback(requestBody: JSONRPCRequest, responseData: any): boolean {
-    // Critical methods that need fallback
+    // Critical methods that need fallback on errors
     const criticalMethods = [
       'eth_call',
       'eth_getLogs', 
@@ -330,80 +335,54 @@ export class HTTPClient {
       'eth_getTransactionByBlockNumberAndIndex'
     ];
     
-    // Always try fallback for critical methods if primary returns invalid data
+    // For non-critical methods, only try fallback if there's a clear error
     if (!criticalMethods.includes(requestBody.method)) {
-      // For non-critical methods, only try fallback if there's a clear error
       if (responseData?.error?.code && responseData.error.code < 0) {
         return true; // JSON-RPC error
       }
       return false;
     }
     
-    // For critical methods, be more aggressive
-    const params = Array.isArray(requestBody.params) ? requestBody.params : [];
-    const isHistorical = this.isHistoricalRequest(params);
-    
-    // Check for JSON-RPC errors (any error code)
+    // Check for JSON-RPC errors - always try fallback on RPC errors
     if (responseData?.error) {
       const errorCode = responseData.error.code;
-      // Try fallback for any JSON-RPC error on critical methods
+      const errorMessage = responseData.error.message?.toLowerCase() || '';
+      
+      // Try fallback for JSON-RPC errors
       if (errorCode < 0) {
         return true;
       }
-    }
-    
-    // Check for invalid/null results
-    if (!this.hasValidResult(responseData, requestBody.method)) {
-      return true; // Always try fallback if result is invalid
-    }
-    
-    // For historical requests, be even more aggressive
-    if (isHistorical) {
-      // Try fallback for empty results on historical requests
-      if (responseData?.result === null || responseData?.result === undefined) {
-        return true;
-      }
       
-      // For eth_getLogs, try fallback if empty array on historical requests
-      // (might indicate missing events due to incomplete archive)
-      if (requestBody.method === 'eth_getLogs' && Array.isArray(responseData?.result) && responseData.result.length === 0) {
+      // Try fallback for archive-related errors (missing trie node, etc.)
+      const archiveErrorPatterns = [
+        'missing trie node',
+        'header not found',
+        'block not found',
+        'state not available',
+        'pruned state',
+        'historical state'
+      ];
+      if (archiveErrorPatterns.some(pattern => errorMessage.includes(pattern))) {
         return true;
       }
     }
     
-    // For "latest" requests on critical methods, also try fallback if result seems invalid
-    // This helps when primary is out of sync
-    if (!isHistorical && ['eth_call', 'eth_getBlockByNumber', 'eth_getBlockReceipts'].includes(requestBody.method)) {
-      const result = responseData?.result;
-      // If result is null/undefined/empty for latest, primary might be out of sync
-      if (result === null || result === undefined || result === '' || (Array.isArray(result) && result.length === 0)) {
-        return true;
+    // Check for clearly invalid results (null/undefined where data is expected)
+    // NOTE: Empty arrays [] are VALID responses for eth_getLogs (no events) and eth_getBlockReceipts (no txs)
+    const result = responseData?.result;
+    
+    // null result is invalid for most methods (except eth_getTransactionReceipt which can be null for pending)
+    if (result === null) {
+      // eth_getTransactionReceipt can legitimately return null for pending/unknown txs
+      if (requestBody.method === 'eth_getTransactionReceipt') {
+        return false; // null is valid - tx not found or pending
       }
+      return true; // null is invalid for other methods
     }
     
-    return false;
-  }
-
-  private isHistoricalRequest(params: any[]): boolean {
-    // Check for historical block parameters
-    const historicalBlockParams = ['fromBlock', 'toBlock', 'blockNumber', 'blockHash'];
-    
-    for (const param of params) {
-      if (typeof param === 'string') {
-        // Check if it's a specific block number/hash (not "latest" or "pending")
-        if (param !== 'latest' && param !== 'pending' && param.startsWith('0x')) {
-          return true;
-        }
-      }
-      
-      if (typeof param === 'object' && param !== null) {
-        // Check object parameters for historical blocks
-        for (const key of historicalBlockParams) {
-          if (param[key] && param[key] !== 'latest' && param[key] !== 'pending') {
-            return true;
-          }
-        }
-      }
+    // undefined result indicates a malformed response
+    if (result === undefined && !responseData?.error) {
+      return true;
     }
     
     return false;

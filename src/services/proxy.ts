@@ -433,7 +433,7 @@ export class RPCProxy {
 			// For eth_call, check the block parameter
 			if (request.method === 'eth_call') {
 				const blockParam = params[1];
-				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
+				if (this.isHistoricalBlockParam(blockParam)) {
 					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
 				}
 				return { isCacheable: true, maxAgeMs: 30000 }; // Latest = 30 seconds
@@ -442,19 +442,36 @@ export class RPCProxy {
 			// For eth_getBlockByNumber, check if it's not "latest"
 			if (request.method === 'eth_getBlockByNumber') {
 				const blockParam = params[0];
-				if (blockParam && typeof blockParam === 'string' && blockParam !== 'latest') {
+				if (this.isHistoricalBlockParam(blockParam)) {
 					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
 				}
 				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
 			}
 			
-			// For eth_getLogs, eth_getStorageAt, eth_getBalance - check for specific blocks
-			if (['eth_getLogs', 'eth_getStorageAt', 'eth_getBalance'].includes(request.method)) {
-				// Check if any parameter contains a specific block number (not "latest")
-				const hasSpecificBlock = params.some(param => 
-					typeof param === 'string' && param.startsWith('0x') && param !== 'latest'
-				);
-				if (hasSpecificBlock) {
+			// For eth_getLogs - check the filter object for specific block range
+			if (request.method === 'eth_getLogs') {
+				const filter = params[0];
+				if (filter && typeof filter === 'object') {
+					const filterObj = filter as { fromBlock?: string; toBlock?: string };
+					// Cache if BOTH fromBlock and toBlock are specific block numbers (not "latest" or "pending")
+					// This ensures we're querying a fixed, historical range
+					const hasHistoricalFromBlock = this.isHistoricalBlockParam(filterObj.fromBlock);
+					const hasHistoricalToBlock = this.isHistoricalBlockParam(filterObj.toBlock);
+					
+					if (hasHistoricalFromBlock && hasHistoricalToBlock) {
+						return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical range = forever
+					}
+				}
+				return { isCacheable: false, maxAgeMs: 0 }; // Has "latest" or missing bounds = not cacheable
+			}
+			
+			// For eth_getStorageAt, eth_getBalance - check the block parameter
+			if (['eth_getStorageAt', 'eth_getBalance'].includes(request.method)) {
+				// eth_getBalance: [address, blockParam]
+				// eth_getStorageAt: [address, position, blockParam]
+				const blockParamIndex = request.method === 'eth_getBalance' ? 1 : 2;
+				const blockParam = params[blockParamIndex];
+				if (this.isHistoricalBlockParam(blockParam)) {
 					return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY }; // Historical = forever
 				}
 				return { isCacheable: false, maxAgeMs: 0 }; // Latest = not cacheable
@@ -464,6 +481,23 @@ export class RPCProxy {
 			return { isCacheable: true, maxAgeMs: Number.POSITIVE_INFINITY };
 		}
 		return { isCacheable: false, maxAgeMs: 0 };
+	}
+
+	/**
+	 * Check if a block parameter represents a historical (specific) block
+	 * Returns true for hex block numbers, false for "latest", "pending", "earliest", undefined, etc.
+	 */
+	private isHistoricalBlockParam(blockParam: unknown): boolean {
+		if (!blockParam || typeof blockParam !== 'string') {
+			return false;
+		}
+		// "latest", "pending", "earliest", "safe", "finalized" are not historical
+		const nonHistoricalTags = ['latest', 'pending', 'earliest', 'safe', 'finalized'];
+		if (nonHistoricalTags.includes(blockParam.toLowerCase())) {
+			return false;
+		}
+		// Must be a hex block number (0x...)
+		return blockParam.startsWith('0x');
 	}
 
 	private errorResponder = (err: Error, _req: Request, res: Response, _next: NextFunction): void => {
