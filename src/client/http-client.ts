@@ -42,7 +42,11 @@ export class HTTPClient {
         // Check if primary returned valid data
         const hasValidResult = this.hasValidResult(primaryResponse.data, requestBody.method);
         
-        if (hasValidResult && !primaryResponse.data.error) {
+        // IMPORTANT: Even if result looks valid, check if we should try fallback
+        // For eth_getLogs with empty results, primary (non-archive) might be missing data
+        const shouldFallback = networkConfig.fallback && this.shouldTryFallback(requestBody, primaryResponse.data);
+        
+        if (hasValidResult && !primaryResponse.data.error && !shouldFallback) {
           this.logger.debug('RPC request completed', {
             method: requestBody.method,
             requestId: requestBody.id,
@@ -52,35 +56,45 @@ export class HTTPClient {
           return primaryResponse;
         }
         
-        // Primary returned invalid data - try fallback if available
-        if (networkConfig.fallback && this.shouldTryFallback(requestBody, primaryResponse.data)) {
-          this.logger.debug('Primary returned invalid data, trying fallback', {
+        // Primary returned invalid data OR should try fallback for historical queries
+        if (shouldFallback) {
+          const isEmptyLogs = requestBody.method === 'eth_getLogs' && 
+            Array.isArray(primaryResponse.data?.result) && 
+            primaryResponse.data.result.length === 0;
+          
+          this.logger.info('Trying fallback - primary returned incomplete data', {
             method: requestBody.method,
             requestId: requestBody.id,
             networkKey,
-            error: primaryResponse.data?.error,
-            result: primaryResponse.data?.result
+            reason: isEmptyLogs ? 'empty_historical_logs' : 'invalid_response',
+            primaryResult: isEmptyLogs ? '[]' : primaryResponse.data?.result,
+            error: primaryResponse.data?.error
           });
           
           try {
             const fallbackResponse = await this.makeRequestWithRetry(
               requestBody,
-              networkConfig.fallback.url,
+              networkConfig.fallback!.url,
               networkKey,
               retries,
               timeoutMs
             );
             
-            this.logger.debug('RPC request completed', {
+            const fallbackResultCount = Array.isArray(fallbackResponse.data?.result) 
+              ? fallbackResponse.data.result.length 
+              : null;
+            
+            this.logger.info('Fallback succeeded', {
               method: requestBody.method,
               requestId: requestBody.id,
               networkKey,
-              upstreamUsed: 'fallback'
+              upstreamUsed: 'fallback',
+              resultCount: fallbackResultCount
             });
             return fallbackResponse;
           } catch (fallbackError) {
             // Fallback failed, return primary response
-            this.logger.debug('Fallback failed, returning primary response', {
+            this.logger.warn('Fallback failed, returning primary response', {
               method: requestBody.method,
               requestId: requestBody.id,
               networkKey,
@@ -367,9 +381,28 @@ export class HTTPClient {
       }
     }
     
-    // Check for clearly invalid results (null/undefined where data is expected)
-    // NOTE: Empty arrays [] are VALID responses for eth_getLogs (no events) and eth_getBlockReceipts (no txs)
     const result = responseData?.result;
+    
+    // For eth_getLogs with HISTORICAL block ranges, try fallback if result is empty
+    // A non-archive node might return [] when it doesn't have the data
+    if (requestBody.method === 'eth_getLogs') {
+      if (Array.isArray(result) && result.length === 0) {
+        const params = Array.isArray(requestBody.params) ? requestBody.params : [];
+        const filter = params[0] as any;
+        if (filter && typeof filter === 'object') {
+          // Check if this is a historical query (specific block numbers, not "latest")
+          const fromBlock = filter.fromBlock;
+          const toBlock = filter.toBlock;
+          const isHistorical = 
+            fromBlock && typeof fromBlock === 'string' && fromBlock.startsWith('0x') && fromBlock !== 'latest' &&
+            toBlock && typeof toBlock === 'string' && toBlock.startsWith('0x') && toBlock !== 'latest';
+          
+          if (isHistorical) {
+            return true; // Try fallback for empty historical queries - primary might not be archive
+          }
+        }
+      }
+    }
     
     // null result is invalid for most methods (except eth_getTransactionReceipt which can be null for pending)
     if (result === null) {
