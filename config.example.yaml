@@ -1,0 +1,13 @@
+server:
+  port: 4500
+  dbPath: "./cache.db"
+  logLevel: "debug" # debug, info, warn, error
+
+networks:
+  - name: "base-mainnet"
+    primary: "https://mainnet.base.org"
+    fallback: "https://base-mainnet.arpc.x.superfluid.dev"
+    
+  - name: "optimism-sepolia"
+    primary: "https://sepolia.optimism.io"
+    fallback: "https://optimism-sepolia.arpc.x.superfluid.dev"

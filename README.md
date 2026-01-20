@@ -1,25 +1,69 @@
-# About
+# Super RPC
 
-This is a simple nodejs app which can be used to _augment_ Ethereum RPC requests.
-It logs requests and responses in full detail, which can help with debugging.
-It also applies a few simple caching strategies. More details below.
+**Super RPC** is a high-performance middleware for EVM RPCs, designed to augment and optimize RPC requests for reliability and speed, especially for subgraphs and indexers.
 
-To use it, first install dependencies with `npm i`, then run with:
+## Features
+
+*   **Multi-Network Support**: Configure multiple networks (e.g., Base, Optimism) via `config.yaml`.
+*   **Performance**:
+    *   **Keep-Alive**: Connection pooling for low-latency upstream requests.
+    *   **Smart Throttling**: Optimized duplicate request handling (100ms delay).
+*   **Smart Caching**:
+    *   **Persistent Cache**: SQLite-based caching.
+    *   **Immutable Data**: Permanently caches `eth_chainId`, `net_version`, etc.
+*   **Fallback Mechanism**: Switches to Archival Node if Primary receives "missing state" errors.
+*   **Production Logging**: Structured logs with internal request tracing.
+
+## Installation
+
+```bash
+npm install
+npm run build
 ```
-RPC=<http-url|ws-url> [PORT=<port>] [DB_FILE=path/to/sqlite/file] node app.js
+
+## Configuration
+
+1.  Copy the example configuration:
+    ```bash
+    cp config.example.yaml config.yaml
+    ```
+2.  Edit `config.yaml` to add your RPC endpoints:
+    ```yaml
+    server:
+      port: 4500
+      dbPath: "./cache.db"
+      logLevel: "info"
+
+    networks:
+      - name: "base-mainnet"
+        primary: "https://... (Full Node)"
+        fallback: "https://... (Archival Node)"
+    ```
+
+## Usage
+
+Start the server:
+
+```bash
+npm start
+# OR for development
+npm run dev
 ```
- 
-If an http url is given, an http server is started.
-If a websocket url is given, a websocket server is started.
-If DB_FILE is specified, a persistent cache is created.
- 
-The following additional functionality is implemented for http upstreams:
-* Responses are cached. For requests with immutable response (e.g. eth_chainId), it always serves the cached response.  
-* For some request (e.g. eth_blockNumber), it serves cached responses only for a given time in order to avoid rate limiting. Can be set with env var CACHE_MAX_AGE (seconds).
-* Tries to detect duplicate requests and slows them down in order to increase the chance of a cache hit. That is, if the same request is received multiple times in short succession, all but the first one are briefly delayed.
- 
-Together this can greatly reduce the requests forwarded to upstream, increasing the chances of not running into rate limits.
-This was created for a very chatty deploy script, allowing to use it with public RPCs with severe rate limiting policy.
- 
-If an upstream error occurs anyway, it will retry several times with exponential backoff. Only if the failure is permanent will the error propagate to the client.
-When the process ends (ctrl-c), a brief summary of cached and forwarded requests is printed.
+
+### Accessing Networks
+
+Send requests to `http://localhost:PORT/<network-name>`:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+  http://localhost:4500/base-mainnet
+```
+
+## Testing
+
+Run the included test script:
+
+```bash
+./scripts/test_rpc.sh
+```
