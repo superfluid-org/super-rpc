@@ -29,7 +29,7 @@ make_rpc_call() {
         echo "    -> $RESPONSE"
     else
         echo -e "${GREEN}OK${NC}"
-        # Print a snippet of the result to keep it clean
+        # Print a snippet of the result to keep it clean, max 100 chars
         echo "    -> ${RESPONSE:0:100}..." 
     fi
 }
@@ -46,23 +46,20 @@ test_network() {
     make_rpc_call "$NETWORK" "eth_blockNumber" "[]" 3
     
     # 3. State Calls (Latest)
-    # Checking zero address balance
     make_rpc_call "$NETWORK" "eth_getBalance" "[\"0x0000000000000000000000000000000000000000\", \"latest\"]" 4
     
-    # 4. Fallback / Archival Test (Block 1)
-    # This should trigger the fallback if the primary node is not archival
-    echo -e "  ${BLUE}[Archival Test]${NC} eth_getBalance (Block 1): "
-    RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
-        -d '{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x0000000000000000000000000000000000000000", "0x1"],"id":5}' \
-        "$BASE_URL/$NETWORK")
-        
-    if [[ $RESPONSE == *"error"* ]]; then
-         echo -e "${RED}FAILED (Fallback didn't work or not archival)${NC}"
-         echo "    -> $RESPONSE"
-    else
-         echo -e "${GREEN}OK (Archival Data Retrieved)${NC}"
-         echo "    -> $RESPONSE"
-    fi
+    # 4. Fallback / Archival Test (Block 15,000,000 -> 0xE4E1C0)
+    echo -e "  ${BLUE}[Archival Test]${NC} eth_getBalance (Block 15M): "
+    make_rpc_call "$NETWORK" "eth_getBalance" "[\"0x0000000000000000000000000000000000000000\", \"0xE4E1C0\"]" 5
+
+    # 5. eth_getLogs Test (Standard 10M range)
+    echo -e "  ${BLUE}[GetLogs Test]${NC} eth_getLogs (10M -> 10M+1): "
+    make_rpc_call "$NETWORK" "eth_getLogs" "[{\"fromBlock\":\"0x989680\",\"toBlock\":\"0x989681\", \"address\": \"0x0000000000000000000000000000000000000000\"}]" 6
+
+    # 6. Immutable eth_call Test (Block 15M) - Simple call to 0x0...0
+    # This checks our new caching logic for specific block tags
+    echo -e "  ${BLUE}[eth_call Test]${NC} eth_call (Block 15M): "
+    make_rpc_call "$NETWORK" "eth_call" "[{\"to\":\"0x0000000000000000000000000000000000000000\",\"data\":\"0x\"}, \"0xE4E1C0\"]" 8
 }
 
 # Configured Networks

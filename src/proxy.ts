@@ -52,9 +52,17 @@ export class ProxyService {
         duplicateDetector.set(cacheKey, Date.now());
 
         // 2. Check Cache
-        const cacheMaxAgeMs = ["eth_chainId", "net_version", "eth_getTransactionReceipt"].includes(method)
-            ? Infinity
-            : CACHE_MAX_AGE_SEC * 1000;
+        const isImmutableEthCall = method === "eth_call" && (() => {
+            const blockTag = reqBody.params[1];
+            if (typeof blockTag === 'string' && !["latest", "pending", "earliest", "safe", "finalized"].includes(blockTag)) return true;
+            if (typeof blockTag === 'object' && (blockTag.blockHash || blockTag.blockNumber)) return true;
+            return false;
+        })();
+
+        const cacheMaxAgeMs = (
+            ["eth_chainId", "net_version", "eth_getTransactionReceipt"].includes(method) ||
+            isImmutableEthCall
+        ) ? Infinity : CACHE_MAX_AGE_SEC * 1000;
 
         const cachedEntry = await this.cache.get(cacheKey);
         if (cachedEntry) {
@@ -75,6 +83,7 @@ export class ProxyService {
         let result = await this.upstreamRequest(network.primary, reqBody);
 
         let outcome = "Primary SUCCESS";
+
         if (this.shouldFallback(result)) {
             this.logger.warn(`${logPrefix} - Primary FAILED (missing state), switching to Fallback: ${network.fallback}`);
             try {
@@ -94,10 +103,16 @@ export class ProxyService {
 
         // 4. Update Cache
         if (result && !result.error) {
-            if (
-                ["eth_chainId", "eth_blockNumber", "net_version"].includes(method) ||
-                (method === "eth_call" && reqBody.params.some((param: any) => typeof param === 'object' && 'blockHash' in param))
-            ) {
+            const isCacheableMethod = ["eth_chainId", "net_version"].includes(method);
+            const isImmutableEthCall = method === "eth_call" && (() => {
+                const blockTag = reqBody.params[1];
+                if (typeof blockTag === 'string' && !["latest", "pending", "earliest", "safe", "finalized"].includes(blockTag)) return true;
+                if (typeof blockTag === 'object' && (blockTag.blockHash || blockTag.blockNumber)) return true;
+                return false;
+            })();
+            // eth_blockNumber is volatile, cache for short duration (handled by CACHE_MAX_AGE_SEC check in #2)
+            // But here we set it.
+            if (isCacheableMethod || method === "eth_blockNumber" || isImmutableEthCall) {
                 this.cache.set(cacheKey, result.result);
             }
         }
