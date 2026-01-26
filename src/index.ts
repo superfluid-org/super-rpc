@@ -5,11 +5,14 @@ import { Cache } from './cache';
 import { ProxyService } from './proxy';
 import { Logger } from './logger';
 
+import { Metrics } from './metrics';
+
 const config = loadConfig('./config.yaml');
 const app = express();
 const logger = new Logger(config.server.logLevel);
+const metrics = new Metrics();
 const cache = new Cache(logger, config.server.dbPath);
-const proxyService = new ProxyService(cache, logger);
+const proxyService = new ProxyService(cache, logger, metrics);
 
 app.use(bodyParser.json());
 
@@ -35,6 +38,16 @@ app.post('/:networkName', async (req, res) => {
 // Stats or health check
 app.get('/health', (req, res) => {
     res.send("OK");
+});
+
+// Prometheus Metrics Endpoint
+app.get('/metrics', async (req, res) => {
+    try {
+        res.set('Content-Type', metrics.registry.contentType);
+        res.end(await metrics.registry.metrics());
+    } catch (ex) {
+        res.status(500).send(ex);
+    }
 });
 
 app.listen(config.server.port, () => {

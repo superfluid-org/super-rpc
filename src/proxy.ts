@@ -5,6 +5,7 @@ import { NetworkConfig } from './config';
 import { Logger } from './logger';
 import { Cache } from './cache';
 import { randomUUID } from 'crypto';
+import { Metrics } from './metrics';
 
 const DUPLICATE_DELAY_TRIGGER_THRESHOLD_MS = 1000;
 const DUPLICATE_MIN_DELAY_MS = 100;
@@ -25,18 +26,22 @@ function getCacheKey(network: string, reqBody: any): string {
 export class ProxyService {
     private cache: Cache;
     private logger: Logger;
+    private metrics: Metrics;
 
-    constructor(cache: Cache, logger: Logger) {
+    constructor(cache: Cache, logger: Logger, metrics: Metrics) {
         this.cache = cache;
         this.logger = logger;
+        this.metrics = metrics;
     }
 
     public async handleRequest(network: NetworkConfig, reqBody: any): Promise<any> {
         const startTime = Date.now();
-        const internalId = randomUUID().split('-')[0]; // Short ID for readability
+        const internalId = randomUUID().split('-')[0];
         const reqId = reqBody.id;
         const method = reqBody.method;
         const cacheKey = getCacheKey(network.name, reqBody);
+
+        this.metrics.rpcRequests.inc({ network: network.name, method, status: 'pending' });
 
         const logPrefix = `[${network.name}] [${internalId}] ${method}${reqId !== undefined ? ` (id:${reqId})` : ''}`;
 
@@ -52,23 +57,17 @@ export class ProxyService {
         duplicateDetector.set(cacheKey, Date.now());
 
         // 2. Check Cache
-        const isImmutableEthCall = method === "eth_call" && (() => {
-            const blockTag = reqBody.params[1];
-            if (typeof blockTag === 'string' && !["latest", "pending", "earliest", "safe", "finalized"].includes(blockTag)) return true;
-            if (typeof blockTag === 'object' && (blockTag.blockHash || blockTag.blockNumber)) return true;
-            return false;
-        })();
-
-        const cacheMaxAgeMs = (
-            ["eth_chainId", "net_version", "eth_getTransactionReceipt"].includes(method) ||
-            isImmutableEthCall
-        ) ? Infinity : CACHE_MAX_AGE_SEC * 1000;
+        const cacheMaxAgeMs = ["eth_chainId", "net_version", "eth_getTransactionReceipt"].includes(method)
+            ? Infinity
+            : CACHE_MAX_AGE_SEC * 1000;
 
         const cachedEntry = await this.cache.get(cacheKey);
         if (cachedEntry) {
             if (Date.now() - cachedEntry.ts <= cacheMaxAgeMs) {
                 const duration = Date.now() - startTime;
                 this.logger.info(`${logPrefix} - Cache HIT (${duration}ms)`);
+                this.metrics.rpcCacheHits.inc({ network: network.name, method });
+                this.metrics.rpcLatency.observe({ network: network.name, method, source: 'cache' }, duration / 1000);
                 return {
                     jsonrpc: "2.0",
                     id: reqId,
@@ -78,24 +77,32 @@ export class ProxyService {
                 this.logger.debug(`${logPrefix} - Cache expired`);
             }
         }
+        this.metrics.rpcCacheMisses.inc({ network: network.name, method });
 
         // 3. Upstream Request (Primary -> Fallback)
         let result = await this.upstreamRequest(network.primary, reqBody);
 
         let outcome = "Primary SUCCESS";
+        const upstreamStart = Date.now();
 
         if (this.shouldFallback(result)) {
             this.logger.warn(`${logPrefix} - Primary FAILED (missing state), switching to Fallback: ${network.fallback}`);
+            this.metrics.rpcFallback.inc({ network: network.name, method, reason: 'missing_state' });
+
             try {
                 const fallbackResult = await this.upstreamRequest(network.fallback, reqBody);
                 result = fallbackResult;
                 outcome = "Fallback SUCCESS";
+                this.metrics.rpcLatency.observe({ network: network.name, method, source: 'fallback' }, (Date.now() - upstreamStart) / 1000);
             } catch (fallbackErr) {
                 this.logger.error(`${logPrefix} - Fallback also failed.`);
                 outcome = "Fallback FAILED";
             }
         } else if (result && result.error) {
             outcome = "Primary RPC ERROR";
+            this.metrics.rpcErrors.inc({ network: network.name, method, error_type: 'rpc_error' });
+        } else {
+            this.metrics.rpcLatency.observe({ network: network.name, method, source: 'primary' }, (Date.now() - upstreamStart) / 1000);
         }
 
         const duration = Date.now() - startTime;
@@ -103,16 +110,10 @@ export class ProxyService {
 
         // 4. Update Cache
         if (result && !result.error) {
-            const isCacheableMethod = ["eth_chainId", "net_version"].includes(method);
-            const isImmutableEthCall = method === "eth_call" && (() => {
-                const blockTag = reqBody.params[1];
-                if (typeof blockTag === 'string' && !["latest", "pending", "earliest", "safe", "finalized"].includes(blockTag)) return true;
-                if (typeof blockTag === 'object' && (blockTag.blockHash || blockTag.blockNumber)) return true;
-                return false;
-            })();
-            // eth_blockNumber is volatile, cache for short duration (handled by CACHE_MAX_AGE_SEC check in #2)
-            // But here we set it.
-            if (isCacheableMethod || method === "eth_blockNumber" || isImmutableEthCall) {
+            if (
+                ["eth_chainId", "eth_blockNumber", "net_version"].includes(method) ||
+                (method === "eth_call" && reqBody.params.some((param: any) => typeof param === 'object' && 'blockHash' in param))
+            ) {
                 this.cache.set(cacheKey, result.result);
             }
         }
