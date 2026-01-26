@@ -120,7 +120,7 @@ export class ProxyService {
         return result;
     }
 
-    private async upstreamRequest(url: string, reqBody: any, retries = 3): Promise<any> {
+    private async upstreamRequest(url: string, reqBody: any): Promise<any> {
         try {
             const res = await axios.post(url, reqBody, {
                 timeout: 10000,
@@ -129,13 +129,7 @@ export class ProxyService {
             });
             return res.data;
         } catch (err: any) {
-            if (retries > 0) {
-                this.logger.debug(`Upstream retry ${url} - ${retries} left`);
-                await new Promise(r => setTimeout(r, 1000));
-                return this.upstreamRequest(url, reqBody, retries - 1);
-            }
-            // If network error, return null or throw. 
-            // Better to return a structure that indicates failure so we can determine fallback.
+            // If network error, return error object so we can fallback.
             return { error: { code: -32000, message: `Network error: ${err.message}` } };
         }
     }
