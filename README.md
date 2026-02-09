@@ -1,6 +1,6 @@
 # Super RPC
 
-**Super RPC** is a high-performance middleware for EVM RPCs, designed to augment and optimize RPC requests for reliability and speed, especially for subgraphs and indexers.
+**Super RPC** is a middleware for EVM RPCs, designed to augment and optimize RPC requests for reliability and speed, especially for subgraphs and indexers.
 
 ## Features
 
@@ -8,10 +8,10 @@
 *   **Performance**:
     *   **Keep-Alive**: Connection pooling for low-latency upstream requests.
     *   **Smart Throttling**: Optimized duplicate request handling (100ms delay).
-*   **Smart Caching**:
+*   **Caching**:
     *   **Persistent Cache**: SQLite-based caching.
     *   **Immutable Data**: Permanently caches `eth_chainId`, `net_version`, etc.
-*   **Fallback Mechanism**: Switches to Archival Node if Primary receives "missing state" errors.
+*   **Fallback Mechanism**: Switches to Archival Node if Primary returns errors.
 *   **Production Logging**: Structured logs with internal request tracing.
 
 
