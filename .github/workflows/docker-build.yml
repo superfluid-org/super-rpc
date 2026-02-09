@@ -76,6 +76,10 @@ jobs:
         chmod +x ./scripts/test_rpc.sh
         ./scripts/test_rpc.sh
 
+    - name: Show Container Logs
+      if: always()
+      run: docker compose logs
+
     # 3. Push to Registry (Only on Push event)
     - name: Build and push Docker image
       if: github.event_name == 'push'
