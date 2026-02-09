@@ -1,0 +1,9 @@
+services:
+  super-rpc:
+    build: .
+    ports:
+      - "4500:4500"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data
+    restart: always

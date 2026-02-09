@@ -14,7 +14,26 @@
 *   **Fallback Mechanism**: Switches to Archival Node if Primary receives "missing state" errors.
 *   **Production Logging**: Structured logs with internal request tracing.
 
-## Installation
+
+## Docker
+
+You can run the application using Docker Compose. This automatically handles dependencies and mounts the configuration file.
+
+1.  **Prepare Configuration**:
+    ensure you have a `config.yaml` file (copy from example if needed).
+    ```bash
+    cp config.example.yaml config.yaml
+    ```
+
+2.  **Run with Docker Compose**:
+    ```bash
+    docker compose up -d --build
+    ```
+
+    The application will be available at `http://localhost:4500`.
+    Data will be persisted in the `./data` directory.
+
+## Local Installation
 
 ```bash
 npm install

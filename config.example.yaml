@@ -1,6 +1,6 @@
 server:
   port: 4500
-  dbPath: "./cache.db"
+  dbPath: "/app/data/cache.db"
   logLevel: "debug" # debug, info, warn, error
 
 networks:
