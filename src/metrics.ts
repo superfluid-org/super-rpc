@@ -1,4 +1,4 @@
-import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client';
+import { Registry, Counter, Histogram } from 'prom-client';
 
 export class Metrics {
     public readonly registry: Registry;
@@ -22,9 +22,6 @@ export class Metrics {
 
     constructor() {
         this.registry = new Registry();
-
-        // Add default nodejs metrics (CPU, memory, etc.)
-        collectDefaultMetrics({ register: this.registry, prefix: 'super_rpc_' });
 
         this.rpcRequests = new Counter({
             name: 'rpc_requests_total',
