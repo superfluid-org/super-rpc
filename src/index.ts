@@ -40,14 +40,21 @@ app.get('/health', (req, res) => {
     res.send("OK");
 });
 
-// Prometheus Metrics Endpoint
-app.get('/metrics', async (req, res) => {
+// Prometheus Metrics Endpoint on separate port
+const metricsApp = express();
+const METRICS_PORT = 4510;
+
+metricsApp.get('/metrics', async (req, res) => {
     try {
         res.set('Content-Type', metrics.registry.contentType);
         res.end(await metrics.registry.metrics());
     } catch (ex) {
         res.status(500).send(ex);
     }
+});
+
+metricsApp.listen(METRICS_PORT, () => {
+    logger.info(`Metrics server listening on port ${METRICS_PORT}`);
 });
 
 app.listen(config.server.port, () => {

@@ -30,7 +30,9 @@ You can run the application using Docker Compose. This automatically handles dep
     docker compose up -d --build
     ```
 
-    The application will be available at `http://localhost:4500`.
+    *   **RPC Endpoint**: `http://localhost:4500`
+    *   **Metrics Endpoint**: `http://localhost:4510/metrics`
+    
     Data will be persisted in the `./data` directory.
 
 ## Local Installation

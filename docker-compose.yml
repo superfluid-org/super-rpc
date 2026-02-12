@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "4500:4500"
+      - "4510:4510"
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data

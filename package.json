@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "lint": "eslint 'src/**/*.ts'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "git@d10r.net",
@@ -28,6 +29,9 @@
     "@types/node": "^25.0.9",
     "@types/sqlite3": "^3.1.11",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "eslint": "^9.39.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

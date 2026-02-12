@@ -24,6 +24,7 @@ RUN npm prune --production
 
 # Expose the port
 EXPOSE 4500
+EXPOSE 4510
 
 # Start the application
 CMD ["npm", "start"]
