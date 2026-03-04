@@ -140,7 +140,7 @@ export class ProxyService {
         if (res && res.error && res.error.message && res.error.message.includes("Network error")) return true;
 
         // Condition 2: RPC Error indicating missing state
-        // Common errors: "header not found", "missing trie node", "execution reverted", "unknown block"
+        // Common errors: "header not found", "missing trie node", "execution reverted", "unknown block", "exceed max addresses"
         if (res && res.error) {
             const msg = res.error.message.toLowerCase();
             return (
@@ -149,7 +149,8 @@ export class ProxyService {
                 msg.includes("unknown block") ||
                 msg.includes("state not available") ||
                 msg.includes("historical state") ||
-                msg.includes("is not available")
+                msg.includes("is not available") ||
+                msg.includes("exceed max addresses")
             );
         }
 
