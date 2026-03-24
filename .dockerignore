@@ -9,5 +9,9 @@ docker-compose.yml
 README.md
 *.log
 cache.db
+cache.db-wal
+cache.db-shm
 coverage
 .env
+.env.*
+config.example.yaml

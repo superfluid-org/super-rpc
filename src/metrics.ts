@@ -17,9 +17,6 @@ export class Metrics {
     // Fallback
     public readonly rpcFallback: Counter;
 
-    // Upstream
-    public readonly upstreamRetries: Counter;
-
     constructor() {
         this.registry = new Registry();
 
@@ -40,7 +37,7 @@ export class Metrics {
         this.rpcLatency = new Histogram({
             name: 'rpc_latency_seconds',
             help: 'Latency of RPC requests in seconds',
-            labelNames: ['network', 'method', 'source'], // source: cache, primary, fallback
+            labelNames: ['network', 'method', 'source'],
             buckets: [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10],
             registers: [this.registry]
         });
@@ -63,13 +60,6 @@ export class Metrics {
             name: 'rpc_fallback_events_total',
             help: 'Total number of fallback events triggered',
             labelNames: ['network', 'method', 'reason'],
-            registers: [this.registry]
-        });
-
-        this.upstreamRetries = new Counter({
-            name: 'rpc_upstream_retries_total',
-            help: 'Total number of upstream retries',
-            labelNames: ['network', 'upstream'],
             registers: [this.registry]
         });
     }
