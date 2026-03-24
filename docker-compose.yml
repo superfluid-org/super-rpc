@@ -4,6 +4,13 @@ services:
     ports:
       - "4500:4500"
       - "4510:4510"
+    environment:
+      - WORKERS=2
+      - METRICS_PORT=4510
+      - MAX_CONCURRENT=500
+      - MAX_SOCKETS=50
+      - CACHE_MAX_AGE=10
+      - CACHE_MAX_ENTRIES=10000
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data

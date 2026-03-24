@@ -1,90 +1,45 @@
 # Super RPC
 
-**Super RPC** is a middleware for EVM RPCs, designed to augment and optimize RPC requests for reliability and speed, especially for subgraphs and indexers.
+High-performance EVM RPC proxy with caching, request coalescing, and automatic fallback to archival nodes.
 
-## Features
-
-*   **Multi-Network Support**: Configure multiple networks (e.g., Base, Optimism) via `config.yaml`.
-*   **Performance**:
-    *   **Keep-Alive**: Connection pooling for low-latency upstream requests.
-    *   **Smart Throttling**: Optimized duplicate request handling (100ms delay).
-*   **Caching**:
-    *   **Persistent Cache**: SQLite-based caching.
-    *   **Immutable Data**: Permanently caches `eth_chainId`, `net_version`, etc.
-*   **Fallback Mechanism**: Switches to Archival Node if Primary returns errors.
-*   **Production Logging**: Structured logs with internal request tracing.
-
-
-## Docker
-
-You can run the application using Docker Compose. This automatically handles dependencies and mounts the configuration file.
-
-1.  **Prepare Configuration**:
-    ensure you have a `config.yaml` file (copy from example if needed).
-    ```bash
-    cp config.example.yaml config.yaml
-    ```
-
-2.  **Run with Docker Compose**:
-    ```bash
-    docker compose up -d --build
-    ```
-
-    *   **RPC Endpoint**: `http://localhost:4500`
-    *   **Metrics Endpoint**: `http://localhost:4510/metrics`
-    
-    Data will be persisted in the `./data` directory.
-
-## Local Installation
+## Quick Start
 
 ```bash
-npm install
-npm run build
+cp config.example.yaml config.yaml
+# Edit config.yaml with your RPC endpoints
+docker compose up -d --build
 ```
+
+- **RPC**: `http://localhost:4500/<network-name>`
+- **Metrics**: `http://localhost:4510/metrics`
 
 ## Configuration
 
-1.  Copy the example configuration:
-    ```bash
-    cp config.example.yaml config.yaml
-    ```
-2.  Edit `config.yaml` to add your RPC endpoints:
-    ```yaml
-    server:
-      port: 4500
-      dbPath: "./cache.db"
-      logLevel: "info"
+```yaml
+server:
+  port: 4500
+  dbPath: "/app/data/cache.db"
+  logLevel: "info"
 
-    networks:
-      - name: "base-mainnet"
-        primary: "https://... (Full Node)"
-        fallback: "https://... (Archival Node)"
-    ```
-
-## Usage
-
-Start the server:
-
-```bash
-npm start
-# OR for development
-npm run dev
+networks:
+  - name: "base-mainnet"
+    primary: "https://..."
+    fallback: "https://..."
 ```
 
-### Accessing Networks
+## Environment Variables
 
-Send requests to `http://localhost:PORT/<network-name>`:
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  http://localhost:4500/base-mainnet
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WORKERS` | CPU count | Cluster workers |
+| `METRICS_PORT` | 4510 | Metrics port |
+| `MAX_CONCURRENT` | 500 | Max concurrent requests per worker |
+| `MAX_SOCKETS` | 50 | Max connections per upstream host |
+| `CACHE_MAX_AGE` | 10 | Cache TTL (seconds) |
+| `CACHE_MAX_ENTRIES` | 10000 | LRU memory cache size per worker |
 
 ## Testing
 
-Run the included test script:
-
 ```bash
-./scripts/test_rpc.sh
+./scripts/test_rpc.sh http://localhost:4500 http://localhost:4510
 ```

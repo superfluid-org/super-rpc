@@ -1,30 +1,20 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
-# Install build dependencies for sqlite3/python
+# Build deps for sqlite3 native module
 RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies (including devDependencies for build step if needed, or just production if pre-built)
-# Since we have a 'build' script (tsc), we need devDependencies to build, then we can prune.
-# For simplicity in this plan, we'll install all, build, then prune.
 RUN npm install
 
-# Copy source
 COPY . .
+RUN npm run build && npm prune --production && npm cache clean --force
 
-# Build the application
-RUN npm run build
+RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
+USER app
 
-# Prune dev dependencies (optional, but good for image size)
-RUN npm prune --production
-
-# Expose the port
 EXPOSE 4500
 EXPOSE 4510
 
-# Start the application
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]

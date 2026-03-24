@@ -9,8 +9,11 @@ config.yaml
 .env
 
 # Database
+data/
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Logs
 npm-debug.log*
