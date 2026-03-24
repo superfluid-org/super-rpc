@@ -131,6 +131,11 @@ if (cluster.isPrimary) {
 
     process.on('uncaughtException', (err) => {
         logger.error(`Uncaught exception: ${err.message}`);
+        // SQLite errors are non-fatal — memory cache continues working
+        if (err.message && err.message.startsWith('SQLITE_')) {
+            logger.warn(`Non-fatal SQLite error, continuing with memory cache`);
+            return;
+        }
         gracefulShutdown('uncaughtException');
     });
     process.on('unhandledRejection', (reason) => {
