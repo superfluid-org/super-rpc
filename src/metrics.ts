@@ -1,4 +1,4 @@
-import { Counter, Histogram, register } from 'prom-client';
+import { Counter, Gauge, Histogram, register } from 'prom-client';
 
 export class Metrics {
     public readonly registry = register;
@@ -6,6 +6,9 @@ export class Metrics {
     // RPC Traffic
     public readonly rpcRequests: Counter;
     public readonly rpcErrors: Counter;
+    public readonly rpcActiveRequests: Gauge;
+    public readonly rpcCoalesced: Counter;
+    public readonly rpcRejected: Counter;
 
     // Latency
     public readonly rpcLatency: Histogram;
@@ -16,6 +19,9 @@ export class Metrics {
 
     // Fallback
     public readonly rpcFallback: Counter;
+
+    // Upstream
+    public readonly upstreamHttpErrors: Counter;
 
     constructor() {
         this.rpcRequests = new Counter({
@@ -28,6 +34,24 @@ export class Metrics {
             name: 'rpc_errors_total',
             help: 'Total number of RPC errors',
             labelNames: ['network', 'method', 'error_type'],
+        });
+
+        this.rpcActiveRequests = new Gauge({
+            name: 'rpc_active_requests',
+            help: 'Number of in-flight requests currently being processed',
+            labelNames: ['network'],
+        });
+
+        this.rpcCoalesced = new Counter({
+            name: 'rpc_coalesced_total',
+            help: 'Total number of requests served via in-flight coalescing',
+            labelNames: ['network', 'method'],
+        });
+
+        this.rpcRejected = new Counter({
+            name: 'rpc_rejected_total',
+            help: 'Total number of requests rejected due to overload',
+            labelNames: ['network'],
         });
 
         this.rpcLatency = new Histogram({
@@ -53,6 +77,12 @@ export class Metrics {
             name: 'rpc_fallback_events_total',
             help: 'Total number of fallback events triggered',
             labelNames: ['network', 'method', 'reason'],
+        });
+
+        this.upstreamHttpErrors = new Counter({
+            name: 'rpc_upstream_http_errors_total',
+            help: 'Total number of non-200 HTTP responses from upstream RPCs',
+            labelNames: ['network', 'upstream', 'status_code'],
         });
     }
 }
