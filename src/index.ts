@@ -1,6 +1,7 @@
 import cluster from 'cluster';
 import os from 'os';
 import Fastify from 'fastify';
+import { AggregatorRegistry } from 'prom-client';
 import { loadConfig } from './config';
 import { Cache } from './cache';
 import { ProxyService } from './proxy';
@@ -57,16 +58,30 @@ if (cluster.isPrimary) {
         });
     }
 
+    // --- Aggregated metrics server in master ---
+    const aggregatorRegistry = new AggregatorRegistry();
+    const metricsApp = Fastify();
+
+    metricsApp.get('/metrics', async (_request, reply) => {
+        reply.header('Content-Type', aggregatorRegistry.contentType);
+        return aggregatorRegistry.clusterMetrics();
+    });
+
+    metricsApp.listen({ port: METRICS_PORT, host: '0.0.0.0' }).then(() => {
+        logger.info(`Metrics server ready on port ${METRICS_PORT}`);
+    });
+
 } else {
     const config = loadConfig('./config.yaml');
     const logger = new Logger(config.server.logLevel);
     const metrics = new Metrics();
+    // Register IPC listener so master can aggregate metrics from this worker
+    new AggregatorRegistry();
     const cache = new Cache(logger, config.server.dbPath);
     const proxyService = new ProxyService(cache, logger, metrics);
 
     const networkMap = new Map(config.networks.map(n => [n.name, n]));
 
-    // --- Main RPC server ---
     const app = Fastify({ bodyLimit: 1_048_576 });
 
     app.post<{ Params: { networkName: string } }>('/:networkName', async (request, reply) => {
@@ -93,18 +108,9 @@ if (cluster.isPrimary) {
         return { status: "OK", activeRequests: proxyService.activeRequests, pid: process.pid };
     });
 
-    // --- Metrics server on separate port ---
-    const metricsApp = Fastify();
-
-    metricsApp.get('/metrics', async (request, reply) => {
-        reply.header('Content-Type', metrics.registry.contentType);
-        return metrics.registry.metrics();
-    });
-
     const start = async () => {
         try {
             await app.listen({ port: config.server.port, host: '0.0.0.0' });
-            await metricsApp.listen({ port: METRICS_PORT, host: '0.0.0.0' });
             logger.info(`Worker ${process.pid} ready`);
         } catch (err: any) {
             logger.error(`Worker ${process.pid} failed to start: ${err.message}`);
@@ -114,7 +120,7 @@ if (cluster.isPrimary) {
 
     function gracefulShutdown(signal: string) {
         logger.info(`Worker ${process.pid}: ${signal} — draining`);
-        Promise.all([app.close(), metricsApp.close()]).then(() => {
+        app.close().then(() => {
             cache.close();
             process.exit(0);
         });
@@ -131,7 +137,6 @@ if (cluster.isPrimary) {
 
     process.on('uncaughtException', (err) => {
         logger.error(`Uncaught exception: ${err.message}`);
-        // SQLite errors are non-fatal — memory cache continues working
         if (err.message && err.message.startsWith('SQLITE_')) {
             logger.warn(`Non-fatal SQLite error, continuing with memory cache`);
             return;

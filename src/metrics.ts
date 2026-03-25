@@ -1,7 +1,7 @@
-import { Registry, Counter, Histogram } from 'prom-client';
+import { Counter, Histogram, register } from 'prom-client';
 
 export class Metrics {
-    public readonly registry: Registry;
+    public readonly registry = register;
 
     // RPC Traffic
     public readonly rpcRequests: Counter;
@@ -18,20 +18,16 @@ export class Metrics {
     public readonly rpcFallback: Counter;
 
     constructor() {
-        this.registry = new Registry();
-
         this.rpcRequests = new Counter({
             name: 'rpc_requests_total',
             help: 'Total number of RPC requests',
             labelNames: ['network', 'method', 'status'],
-            registers: [this.registry]
         });
 
         this.rpcErrors = new Counter({
             name: 'rpc_errors_total',
             help: 'Total number of RPC errors',
             labelNames: ['network', 'method', 'error_type'],
-            registers: [this.registry]
         });
 
         this.rpcLatency = new Histogram({
@@ -39,28 +35,24 @@ export class Metrics {
             help: 'Latency of RPC requests in seconds',
             labelNames: ['network', 'method', 'source'],
             buckets: [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10],
-            registers: [this.registry]
         });
 
         this.rpcCacheHits = new Counter({
             name: 'rpc_cache_hits_total',
             help: 'Total number of cache hits',
             labelNames: ['network', 'method'],
-            registers: [this.registry]
         });
 
         this.rpcCacheMisses = new Counter({
             name: 'rpc_cache_misses_total',
             help: 'Total number of cache misses',
             labelNames: ['network', 'method'],
-            registers: [this.registry]
         });
 
         this.rpcFallback = new Counter({
             name: 'rpc_fallback_events_total',
             help: 'Total number of fallback events triggered',
             labelNames: ['network', 'method', 'reason'],
-            registers: [this.registry]
         });
     }
 }
