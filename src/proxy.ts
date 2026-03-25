@@ -93,15 +93,17 @@ export class ProxyService {
 
         // Backpressure: reject if overloaded
         if (this._activeRequests >= MAX_CONCURRENT_REQUESTS) {
-            this.metrics.rpcErrors.inc({ network: network.name, method: normalizeMethod(reqBody.method), error_type: 'overloaded' });
+            this.metrics.rpcRejected.inc({ network: network.name });
             return { jsonrpc: "2.0", id: reqBody.id, error: { code: -32000, message: "Server overloaded" } };
         }
 
         this._activeRequests++;
+        this.metrics.rpcActiveRequests.inc({ network: network.name });
         try {
             return await this._handleRequest(network, reqBody);
         } finally {
             this._activeRequests--;
+            this.metrics.rpcActiveRequests.dec({ network: network.name });
         }
     }
 
@@ -140,6 +142,7 @@ export class ProxyService {
         const existingFlight = this.inflight.get(cacheKey);
         if (existingFlight) {
             this.logger.debug(`${logPrefix} - Coalescing with in-flight request`);
+            this.metrics.rpcCoalesced.inc({ network: network.name, method: metricMethod });
             const result = await existingFlight;
             return { ...result, id: reqId };
         }
@@ -165,13 +168,13 @@ export class ProxyService {
         let outcome: string;
         const upstreamStart = Date.now();
 
-        result = await this.upstreamRequest(network.primary, reqBody);
+        result = await this.upstreamRequest(network.name, 'primary', network.primary, reqBody);
 
         if (this.shouldFallback(result)) {
             this.logger.warn(`${logPrefix} - Primary FAILED, switching to Fallback`);
             this.metrics.rpcFallback.inc({ network: network.name, method: metricMethod, reason: 'missing_state' });
 
-            const fallbackResult = await this.upstreamRequest(network.fallback, reqBody);
+            const fallbackResult = await this.upstreamRequest(network.name, 'fallback', network.fallback, reqBody);
             result = fallbackResult;
             outcome = result?.error ? "Fallback FAILED" : "Fallback SUCCESS";
             if (!result?.error) {
@@ -186,6 +189,8 @@ export class ProxyService {
         }
 
         const duration = Date.now() - startTime;
+        const completionStatus = (result && !result.error) ? 'completed' : 'failed';
+        this.metrics.rpcRequests.inc({ network: network.name, method: metricMethod, status: completionStatus });
         this.logger.info(`${logPrefix} - ${outcome!} (${duration}ms)`);
 
         // 4. Update Cache
@@ -203,7 +208,7 @@ export class ProxyService {
         return result;
     }
 
-    private async upstreamRequest(url: string, reqBody: any): Promise<any> {
+    private async upstreamRequest(networkName: string, upstream: string, url: string, reqBody: any): Promise<any> {
         try {
             const pool = getPool(url);
             const { pathname, search } = new URL(url);
@@ -222,6 +227,10 @@ export class ProxyService {
             let data = '';
             for await (const chunk of resBody) {
                 data += chunk;
+            }
+
+            if (statusCode !== 200) {
+                this.metrics.upstreamHttpErrors.inc({ network: networkName, upstream, status_code: String(statusCode) });
             }
 
             return JSON.parse(data);
